@@ -11,8 +11,8 @@ android {
 
     defaultConfig {
         applicationId = "com.example.cameraselect"
-        minSdk = 36
-        targetSdk = 37
+        minSdk = 31
+        targetSdk = 32
         versionCode = 1
         versionName = "1.0"
 
