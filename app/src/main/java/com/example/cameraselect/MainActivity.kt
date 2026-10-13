@@ -605,7 +605,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             )
         }
 
-        // 6. Top-Right Settings (Cog wheel) Icon (Disabled while recording)
+        // 6. Top-Right Settings (Cogwheel) Icon (Disabled while recording)
         IconButton(
             onClick = { if (!isRecording) viewModel.setSettingsOpen(true) },
             enabled = !isRecording,
