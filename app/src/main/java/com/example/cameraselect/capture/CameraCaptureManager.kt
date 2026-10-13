@@ -11,7 +11,6 @@ import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.media.MediaRecorder
 import android.net.Uri
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
@@ -52,7 +51,7 @@ object CameraCaptureManager {
         }
     }
 
-    fun chooseOptimalVideoSize(characteristics: CameraCharacteristics, previewSize: Size): Size {
+    fun chooseOptimalVideoSize(characteristics: CameraCharacteristics): Size {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val videoSizes = map?.getOutputSizes(MediaRecorder::class.java)
             ?: map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)
@@ -298,12 +297,7 @@ object CameraCaptureManager {
         deviceRotationDegrees: Int
     ): MediaRecorder? {
         return try {
-            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
+            val recorder = MediaRecorder(context)
 
             val hasAudio = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.RECORD_AUDIO

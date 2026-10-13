@@ -104,7 +104,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -1349,7 +1348,6 @@ private class CameraSessionHolder {
         val chars = characteristics
         val ctx = context
         val prevSurface = previewSurface
-        val pSize = previewSize ?: Size(1920, 1080)
 
         if (isRecording || dev == null || chars == null || ctx == null || prevSurface == null) {
             onError("Camera not ready for recording")
@@ -1363,7 +1361,7 @@ private class CameraSessionHolder {
         }
         val (videoUri, pfd) = videoUriPair
 
-        val videoSize = CameraCaptureManager.chooseOptimalVideoSize(chars, pSize)
+        val videoSize = CameraCaptureManager.chooseOptimalVideoSize(chars)
         val recorder = CameraCaptureManager.prepareMediaRecorder(ctx, pfd, chars, videoSize, deviceRotationDegrees)
         if (recorder == null) {
             try { pfd.close() } catch (_: Exception) {}
