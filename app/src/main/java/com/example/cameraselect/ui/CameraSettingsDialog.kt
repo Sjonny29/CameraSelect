@@ -152,82 +152,28 @@ fun CameraSettingsDialog(
                 Spacer(modifier = Modifier.height(if (isLandscape) 6.dp else 12.dp))
 
                 // 2. Mirror image Toggle Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = if (isLandscape) 4.dp else 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Mirror image",
-                        fontSize = if (isLandscape) 16.sp else 20.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = Color.Black
-                    )
-                    Switch(
-                        checked = isMirrored,
-                        onCheckedChange = { onToggleIsMirrored() },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF38ACFA),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFFE0E0E0)
-                        )
-                    )
-                }
+                SettingToggleRow(
+                    label = "Mirror image",
+                    checked = isMirrored,
+                    onToggle = onToggleIsMirrored,
+                    isLandscape = isLandscape
+                )
 
                 // 3. No camera crop Toggle Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = if (isLandscape) 4.dp else 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "No camera crop",
-                        fontSize = if (isLandscape) 16.sp else 20.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = Color.Black
-                    )
-                    Switch(
-                        checked = noCrop,
-                        onCheckedChange = { onToggleNoCrop() },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF38ACFA),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFFE0E0E0)
-                        )
-                    )
-                }
+                SettingToggleRow(
+                    label = "No camera crop",
+                    checked = noCrop,
+                    onToggle = onToggleNoCrop,
+                    isLandscape = isLandscape
+                )
 
                 // 4. Show hidden lenses Toggle Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = if (isLandscape) 4.dp else 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Show hidden lenses",
-                        fontSize = if (isLandscape) 16.sp else 20.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = Color.Black
-                    )
-                    Switch(
-                        checked = showHidden,
-                        onCheckedChange = { onToggleShowHidden() },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF38ACFA),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFFE0E0E0)
-                        )
-                    )
-                }
+                SettingToggleRow(
+                    label = "Show hidden lenses",
+                    checked = showHidden,
+                    onToggle = onToggleShowHidden,
+                    isLandscape = isLandscape
+                )
 
                 // 5. Hidden Lenses List (Shown when showHidden is true)
                 if (showHidden) {
@@ -252,6 +198,39 @@ fun CameraSettingsDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingToggleRow(
+    label: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    isLandscape: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = if (isLandscape) 4.dp else 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            fontSize = if (isLandscape) 16.sp else 20.sp,
+            fontWeight = FontWeight.Normal,
+            color = Color.Black
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF38ACFA),
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = Color(0xFFE0E0E0)
+            )
+        )
     }
 }
 

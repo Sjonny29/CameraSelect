@@ -185,8 +185,8 @@ fun FlashOffCustomIcon(
     isRecording: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val redSlashColor = if (isRecording) Color(0xFFFF3B30).copy(alpha = 0.35f) else Color(0xFFFF3B30)
-    val whiteTint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White
+    val redSlashColor = Color(0xFFFF3B30).copy(alpha = if (isRecording) 0.35f else 1f)
+    val whiteTint = Color.White.copy(alpha = if (isRecording) 0.35f else 1f)
 
     Icon(
         imageVector = Icons.Default.FlashOn,
@@ -315,6 +315,9 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
 
     var hasPhysicalFlashForSelectedCamera by remember { mutableStateOf(false) }
     var isScreenFlashForCaptureActive by remember { mutableStateOf(false) }
+
+    // Shared tint for header/camera icons while recording dims them consistently.
+    val activeIconTint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White
 
     val buttonRotation = rememberDeviceRotation()
     val captureController = remember { CameraCaptureController() }
@@ -564,7 +567,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.FlashAuto,
                         contentDescription = "Flash Auto",
-                        tint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White,
+                        tint = activeIconTint,
                         modifier = Modifier.size(44.dp)
                     )
                 }
@@ -578,7 +581,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.FlashOn,
                         contentDescription = "Flash On",
-                        tint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White,
+                        tint = activeIconTint,
                         modifier = Modifier.size(44.dp)
                     )
                 }
@@ -586,7 +589,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.Lightbulb,
                         contentDescription = "Torch Light",
-                        tint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White,
+                        tint = activeIconTint,
                         modifier = Modifier.size(44.dp)
                     )
                 }
@@ -708,7 +711,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.Cameraswitch,
                         contentDescription = "Switch Camera",
-                        tint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White,
+                        tint = activeIconTint,
                         modifier = Modifier.size(52.dp)
                     )
                 }
