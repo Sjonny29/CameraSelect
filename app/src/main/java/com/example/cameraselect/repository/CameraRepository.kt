@@ -241,12 +241,12 @@ class CameraRepository(private val context: Context) {
 
     // SharedPreferences Persistence Helpers
     fun getShowHidden(facing: LensFacing): Boolean {
-        val key = if (facing == LensFacing.FRONT) "show_hidden_front" else "show_hidden_rear"
+        val key = facingKey("show_hidden_", facing)
         return prefs.getBoolean(key, false)
     }
 
     fun setShowHidden(facing: LensFacing, show: Boolean) {
-        val key = if (facing == LensFacing.FRONT) "show_hidden_front" else "show_hidden_rear"
+        val key = facingKey("show_hidden_", facing)
         prefs.edit { putBoolean(key, show) }
     }
 
@@ -262,26 +262,26 @@ class CameraRepository(private val context: Context) {
         val migratedKey = "mirror_default_migrated_v2"
         if (!prefs.getBoolean(migratedKey, false)) {
             prefs.edit {
-                putBoolean("is_mirrored_front", false)
+                putBoolean(facingKey("is_mirrored_", LensFacing.FRONT), false)
                 putBoolean(migratedKey, true)
             }
         }
-        val key = if (facing == LensFacing.FRONT) "is_mirrored_front" else "is_mirrored_rear"
+        val key = facingKey("is_mirrored_", facing)
         return prefs.getBoolean(key, false)
     }
 
     fun setIsMirrored(facing: LensFacing, mirrored: Boolean) {
-        val key = if (facing == LensFacing.FRONT) "is_mirrored_front" else "is_mirrored_rear"
+        val key = facingKey("is_mirrored_", facing)
         prefs.edit { putBoolean(key, mirrored) }
     }
 
     fun getNoCrop(facing: LensFacing): Boolean {
-        val key = if (facing == LensFacing.FRONT) "no_crop_front" else "no_crop_rear"
+        val key = facingKey("no_crop_", facing)
         return prefs.getBoolean(key, false)
     }
 
     fun setNoCrop(facing: LensFacing, noCrop: Boolean) {
-        val key = if (facing == LensFacing.FRONT) "no_crop_front" else "no_crop_rear"
+        val key = facingKey("no_crop_", facing)
         prefs.edit { putBoolean(key, noCrop) }
     }
 
@@ -294,14 +294,17 @@ class CameraRepository(private val context: Context) {
                 FlashMode.OFF
             }
         }
-        if (prefs.contains("is_flash_on")) {
-            val oldIsOn = prefs.getBoolean("is_flash_on", false)
-            return if (oldIsOn) FlashMode.ON else FlashMode.OFF
+        return if (prefs.contains("is_flash_on") && prefs.getBoolean("is_flash_on", false)) {
+            FlashMode.ON
+        } else {
+            FlashMode.OFF
         }
-        return FlashMode.OFF
     }
 
     fun setFlashMode(mode: FlashMode) {
         prefs.edit { putString("flash_mode", mode.name) }
     }
+
+    private fun facingKey(prefix: String, facing: LensFacing): String =
+        prefix + if (facing == LensFacing.FRONT) "front" else "rear"
 }
