@@ -23,7 +23,6 @@ class CameraCaptureController {
         stopRecordingAction?.invoke(onFinished)
     }
 
-    fun isDarkScene(): Boolean {
-        return isDarkSceneAction?.invoke() ?: isDarkSceneState.value
-    }
+    fun isDarkScene(): Boolean =
+        isDarkSceneAction?.invoke() ?: isDarkSceneState.value
 }

@@ -34,14 +34,13 @@ object CameraCaptureManager {
         }
 
         val targetRatio = if (previewSize.height > 0) {
-            maxOf(previewSize.width, previewSize.height).toFloat() / minOf(previewSize.width, previewSize.height).toFloat()
+            aspectRatio(previewSize)
         } else {
             16f / 9f
         }
 
         val matchingRatioSizes = jpegSizes.filter { size ->
-            val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
-            abs(ratio - targetRatio) < 0.08f
+            abs(aspectRatio(size) - targetRatio) < 0.08f
         }
 
         return if (matchingRatioSizes.isNotEmpty()) {
@@ -50,6 +49,12 @@ object CameraCaptureManager {
             jpegSizes.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: jpegSizes[0]
         }
     }
+
+    private fun landscapeSize(size: Size): Size =
+        Size(maxOf(size.width, size.height), minOf(size.width, size.height))
+
+    private fun aspectRatio(size: Size): Float =
+        maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
 
     fun chooseOptimalVideoSize(characteristics: CameraCharacteristics): Size {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -66,7 +71,7 @@ object CameraCaptureManager {
             (it.width == 1920 && it.height == 1080) || (it.width == 1080 && it.height == 1920)
         }
         if (p1080 != null) {
-            return Size(maxOf(p1080.width, p1080.height), minOf(p1080.width, p1080.height))
+            return landscapeSize(p1080)
         }
 
         // 2. Prefer 720p (1280x720)
@@ -74,7 +79,7 @@ object CameraCaptureManager {
             (it.width == 1280 && it.height == 720) || (it.width == 720 && it.height == 1280)
         }
         if (p720 != null) {
-            return Size(maxOf(p720.width, p720.height), minOf(p720.width, p720.height))
+            return landscapeSize(p720)
         }
 
         // 3. Fallback: select largest size <= 1920x1080 or closest to 16:9
@@ -83,11 +88,11 @@ object CameraCaptureManager {
             .ifEmpty { videoSizes.toList() }
 
         val best = candidates.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: videoSizes[0]
-        return Size(maxOf(best.width, best.height), minOf(best.width, best.height))
+        return landscapeSize(best)
     }
 
-    fun computeJpegOrientation(characteristics: CameraCharacteristics, deviceRotationDegrees: Int): Int {
-        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+    private fun computeOrientation(characteristics: CameraCharacteristics, deviceRotationDegrees: Int, defaultSensorOrientation: Int): Int {
+        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: defaultSensorOrientation
         val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
         val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
 
@@ -98,17 +103,11 @@ object CameraCaptureManager {
         }
     }
 
-    fun computeOrientationHint(characteristics: CameraCharacteristics, deviceRotationDegrees: Int): Int {
-        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
-        val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
-        val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
+    fun computeJpegOrientation(characteristics: CameraCharacteristics, deviceRotationDegrees: Int): Int =
+        computeOrientation(characteristics, deviceRotationDegrees, 0)
 
-        return if (isFront) {
-            (sensorOrientation + deviceRotationDegrees) % 360
-        } else {
-            (sensorOrientation - deviceRotationDegrees + 360) % 360
-        }
-    }
+    fun computeOrientationHint(characteristics: CameraCharacteristics, deviceRotationDegrees: Int): Int =
+        computeOrientation(characteristics, deviceRotationDegrees, 90)
 
     @Suppress("ExifInterface")
     fun saveJpegToMediaStore(

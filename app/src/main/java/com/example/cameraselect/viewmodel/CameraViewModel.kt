@@ -99,40 +99,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         updateSelectedCameraForFacing(newFacing)
     }
 
-    fun toggleShowHidden(facing: LensFacing) {
-        if (facing == LensFacing.FRONT) {
-            val newShow = !_showHiddenFront.value
-            _showHiddenFront.value = newShow
-            repository.setShowHidden(LensFacing.FRONT, newShow)
-        } else {
-            val newShow = !_showHiddenRear.value
-            _showHiddenRear.value = newShow
-            repository.setShowHidden(LensFacing.BACK, newShow)
-        }
-    }
+    fun toggleShowHidden(facing: LensFacing) =
+        toggleFacingFlag(facing, _showHiddenFront, _showHiddenRear, repository::setShowHidden)
 
-    fun toggleIsMirrored(facing: LensFacing) {
-        if (facing == LensFacing.FRONT) {
-            val newMirrored = !_isMirroredFront.value
-            _isMirroredFront.value = newMirrored
-            repository.setIsMirrored(LensFacing.FRONT, newMirrored)
-        } else {
-            val newMirrored = !_isMirroredRear.value
-            _isMirroredRear.value = newMirrored
-            repository.setIsMirrored(LensFacing.BACK, newMirrored)
-        }
-    }
+    fun toggleIsMirrored(facing: LensFacing) =
+        toggleFacingFlag(facing, _isMirroredFront, _isMirroredRear, repository::setIsMirrored)
 
-    fun toggleNoCrop(facing: LensFacing) {
-        if (facing == LensFacing.FRONT) {
-            val newNoCrop = !_noCropFront.value
-            _noCropFront.value = newNoCrop
-            repository.setNoCrop(LensFacing.FRONT, newNoCrop)
-        } else {
-            val newNoCrop = !_noCropRear.value
-            _noCropRear.value = newNoCrop
-            repository.setNoCrop(LensFacing.BACK, newNoCrop)
-        }
+    fun toggleNoCrop(facing: LensFacing) =
+        toggleFacingFlag(facing, _noCropFront, _noCropRear, repository::setNoCrop)
+
+    private fun toggleFacingFlag(
+        facing: LensFacing,
+        frontFlow: MutableStateFlow<Boolean>,
+        rearFlow: MutableStateFlow<Boolean>,
+        persist: (LensFacing, Boolean) -> Unit
+    ) {
+        val targetFlow = if (facing == LensFacing.FRONT) frontFlow else rearFlow
+        val newValue = !targetFlow.value
+        targetFlow.value = newValue
+        persist(facing, newValue)
     }
 
     fun cycleFlashMode() {
