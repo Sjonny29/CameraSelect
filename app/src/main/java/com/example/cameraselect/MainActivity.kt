@@ -1682,6 +1682,7 @@ fun Camera2PreviewView(
 ) {
     val context = LocalContext.current
     val cameraManager = remember { context.getSystemService(Context.CAMERA_SERVICE) as CameraManager }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
     val hasFlash = remember(cameraId) {
         try {
@@ -1696,80 +1697,176 @@ fun Camera2PreviewView(
         onHasFlashChanged(hasFlash)
     }
 
-    key(cameraId, isNoCrop) {
-        val holder = remember(cameraId, isNoCrop) { CameraSessionHolder() }
+    // Persisted across camera switches so the TextureView (and its surface) is not
+    // destroyed/recreated on every switch - this avoids the black cut / flicker.
+    var holder by remember { mutableStateOf<CameraSessionHolder?>(null) }
+    var textureView by remember { mutableStateOf<TextureView?>(null) }
+    var surfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
+    var surfaceWidth by remember { mutableStateOf(0) }
+    var surfaceHeight by remember { mutableStateOf(0) }
+    var paused by remember { mutableStateOf(false) }
+    var transitionBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-        DisposableEffect(holder, isMirrored) {
-            holder.onDarkSceneChanged = { dark ->
+    // Wire capture controller to the currently active holder.
+    DisposableEffect(holder, isMirrored) {
+        val h = holder
+        if (h != null) {
+            h.onDarkSceneChanged = { dark ->
                 captureController.isDarkSceneState.value = dark
             }
-            captureController.isDarkSceneState.value = holder.isDarkScene
+            captureController.isDarkSceneState.value = h.isDarkScene
             captureController.takePhotoAction = { rotationDegrees, onCaptured ->
-                holder.takePhoto(isMirrored, rotationDegrees, onCaptured)
+                h.takePhoto(isMirrored, rotationDegrees, onCaptured)
             }
             captureController.startRecordingAction = { rotationDegrees, onStarted, onError ->
-                holder.startRecording(rotationDegrees, onStarted, onError)
+                h.startRecording(rotationDegrees, onStarted, onError)
             }
             captureController.stopRecordingAction = { onFinished ->
-                holder.stopRecording(onFinished)
+                h.stopRecording(onFinished)
             }
             captureController.isDarkSceneAction = {
-                holder.isDarkScene
+                h.isDarkScene
             }
-            onDispose {
-                holder.onDarkSceneChanged = null
+        }
+        onDispose {
+            val h2 = holder
+            if (h2 != null && h2 === h) {
+                h2.onDarkSceneChanged = null
                 captureController.takePhotoAction = null
                 captureController.startRecordingAction = null
                 captureController.stopRecordingAction = null
                 captureController.isDarkSceneAction = null
             }
         }
+    }
 
+    // Switch sessions when the selected camera or crop mode changes, reusing the
+    // existing surface instead of recreating the TextureView.
+    LaunchedEffect(cameraId, isNoCrop) {
+        val st = surfaceTexture
+        val tv = textureView
+        if (st != null && tv != null && surfaceWidth > 0 && surfaceHeight > 0 && !paused) {
+            val bmp = try { tv.getBitmap() } catch (_: Exception) { null }
+            transitionBitmap = bmp
+            holder?.close()
+            val newHolder = CameraSessionHolder()
+            holder = newHolder
+            openCameraSession(
+                context, cameraManager, cameraId, isMirrored, isNoCrop, flashMode,
+                tv, st, surfaceWidth, surfaceHeight, newHolder, deviceRotationDegrees
+            )
+        }
+    }
+
+    // Lifecycle-aware open/close: reopen after returning from gallery etc.
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    paused = true
+                    holder?.close()
+                    holder = null
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME,
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    paused = false
+                    val st = surfaceTexture
+                    val tv = textureView
+                    if (st != null && tv != null && surfaceWidth > 0 && surfaceHeight > 0 && holder == null) {
+                        val newHolder = CameraSessionHolder()
+                        holder = newHolder
+                        openCameraSession(
+                            context, cameraManager, cameraId, isMirrored, isNoCrop, flashMode,
+                            tv, st, surfaceWidth, surfaceHeight, newHolder, deviceRotationDegrees
+                        )
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            holder?.close()
+            holder = null
+        }
+    }
+
+    Box(modifier = modifier) {
         AndroidView(
             factory = { ctx ->
                 TextureView(ctx).apply {
+                    textureView = this
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, this@apply, surface, width, height, holder, deviceRotationDegrees)
+                            surfaceTexture = surface
+                            surfaceWidth = width
+                            surfaceHeight = height
+                            if (!paused && holder == null) {
+                                val newHolder = CameraSessionHolder()
+                                holder = newHolder
+                                openCameraSession(
+                                    ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode,
+                                    this@apply, surface, width, height, newHolder, deviceRotationDegrees
+                                )
+                            }
                         }
 
                         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                            holder.previewSize?.let { previewSize ->
-                                configureTransform(isMirrored, isNoCrop, this@apply, width, height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
+                            surfaceWidth = width
+                            surfaceHeight = height
+                            holder?.previewSize?.let { previewSize ->
+                                configureTransform(isMirrored, isNoCrop, this@apply, width, height, previewSize, holder!!.sensorOrientation, deviceRotationDegrees)
                             }
                         }
 
                         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            holder.close()
+                            holder?.close()
+                            holder = null
+                            surfaceTexture = null
                             return true
                         }
 
-                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                            if (transitionBitmap != null) transitionBitmap = null
+                        }
                     }
 
                     if (isAvailable && width > 0 && height > 0) {
-                        val surface = surfaceTexture
-                        if (surface != null) {
-                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, this, surface, width, height, holder, deviceRotationDegrees)
+                        val surface = this.surfaceTexture
+                        if (surface != null && holder == null && !paused) {
+                            surfaceTexture = surface
+                            surfaceWidth = width
+                            surfaceHeight = height
+                            val newHolder = CameraSessionHolder()
+                            holder = newHolder
+                            openCameraSession(
+                                ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode,
+                                this, surface, width, height, newHolder, deviceRotationDegrees
+                            )
                         }
                     }
                 }
             },
-            update = { textureView ->
-                if (textureView.width > 0 && textureView.height > 0) {
-                    holder.previewSize?.let { previewSize ->
-                        configureTransform(isMirrored, isNoCrop, textureView, textureView.width, textureView.height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
+            update = { tv ->
+                if (tv.width > 0 && tv.height > 0) {
+                    holder?.previewSize?.let { previewSize ->
+                        configureTransform(isMirrored, isNoCrop, tv, tv.width, tv.height, previewSize, holder!!.sensorOrientation, deviceRotationDegrees)
                     }
-                    holder.updateFlash(flashMode)
+                    holder?.updateFlash(flashMode)
                 }
             },
-            modifier = modifier
+            modifier = Modifier.fillMaxSize()
         )
 
-        DisposableEffect(cameraId, isNoCrop) {
-            onDispose {
-                holder.close()
-            }
+        transitionBitmap?.let { bmp ->
+            androidx.compose.foundation.Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
