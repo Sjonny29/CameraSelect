@@ -30,15 +30,21 @@ object CameraCaptureManager {
 
     private const val TAG = "CameraCaptureManager"
 
-    fun chooseOptimalCaptureSize(characteristics: CameraCharacteristics, previewSize: Size): Size {
+    fun chooseOptimalCaptureSize(characteristics: CameraCharacteristics, fallbackSize: Size): Size {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
         if (jpegSizes.isEmpty()) {
-            return previewSize
+            return fallbackSize
         }
 
-        val targetRatio = if (previewSize.height > 0) {
-            aspectRatio(previewSize)
+        // The preview crop setting must not affect still capture: saved JPEGs should
+        // always use the full sensor field of view and its highest resolution.
+        val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+        val pixelArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+        val sensorWidth = activeArray?.width() ?: pixelArray?.width ?: 0
+        val sensorHeight = activeArray?.height() ?: pixelArray?.height ?: 0
+        val targetRatio = if (sensorWidth > 0 && sensorHeight > 0) {
+            maxOf(sensorWidth, sensorHeight).toFloat() / minOf(sensorWidth, sensorHeight).toFloat()
         } else {
             16f / 9f
         }
