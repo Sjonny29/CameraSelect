@@ -14,5 +14,6 @@ data class CameraLensInfo(
     val classification: String,
     val focalLengthMm: Int,
     val focalLengthActual: Float,
-    val displayName: String
+    val displayName: String,
+    val supportsRaw: Boolean = false
 )

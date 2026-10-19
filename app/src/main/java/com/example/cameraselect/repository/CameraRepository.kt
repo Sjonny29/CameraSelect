@@ -7,9 +7,11 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Log
 import androidx.core.content.edit
+import com.example.cameraselect.capture.CameraCaptureManager
 import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.FlashMode
 import com.example.cameraselect.model.LensFacing
+import com.example.cameraselect.model.PhotoFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -33,6 +35,7 @@ class CameraRepository(private val context: Context) {
         val isHidden: Boolean,
         val focalLengthActual: Float,
         val eq35mm: Int,
+        val supportsRaw: Boolean,
     )
 
     @SuppressLint("MissingPermission")
@@ -109,7 +112,16 @@ class CameraRepository(private val context: Context) {
 
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
 
-            rawList.add(RawCameraData(id, lensFacing, isHidden, actualFocal, eq35mm))
+            rawList.add(
+                RawCameraData(
+                    id = id,
+                    lensFacing = lensFacing,
+                    isHidden = isHidden,
+                    focalLengthActual = actualFocal,
+                    eq35mm = eq35mm,
+                    supportsRaw = CameraCaptureManager.supportsRawCapture(characteristics)
+                )
+            )
 
             // Check physical camera IDs backing logical multi-cameras
             if (capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) == true) {
@@ -156,7 +168,8 @@ class CameraRepository(private val context: Context) {
                         classification = classification,
                         focalLengthMm = if (raw.eq35mm > 0) raw.eq35mm else raw.focalLengthActual.roundToInt(),
                         focalLengthActual = raw.focalLengthActual,
-                        displayName = displayName
+                        displayName = displayName,
+                        supportsRaw = raw.supportsRaw
                     )
                 )
             }
@@ -303,6 +316,19 @@ class CameraRepository(private val context: Context) {
 
     fun setFlashMode(mode: FlashMode) {
         prefs.edit { putString("flash_mode", mode.name) }
+    }
+
+    fun getPhotoFormat(): PhotoFormat {
+        val stored = prefs.getString("photo_format", null) ?: return PhotoFormat.JPEG
+        return try {
+            PhotoFormat.valueOf(stored)
+        } catch (_: Exception) {
+            PhotoFormat.JPEG
+        }
+    }
+
+    fun setPhotoFormat(format: PhotoFormat) {
+        prefs.edit { putString("photo_format", format.name) }
     }
 
     private fun facingKey(prefix: String, facing: LensFacing): String =

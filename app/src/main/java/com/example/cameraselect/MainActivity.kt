@@ -19,6 +19,7 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
+import android.media.Image as MediaImage
 import android.media.ImageReader
 import android.media.MediaActionSound
 import android.media.MediaRecorder
@@ -40,6 +41,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -121,6 +123,7 @@ import com.example.cameraselect.capture.CameraCaptureManager
 import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.CaptureMode
 import com.example.cameraselect.model.LensFacing
+import com.example.cameraselect.model.PhotoFormat
 import com.example.cameraselect.ui.CameraSettingsDialog
 import com.example.cameraselect.ui.theme.CameraSelectTheme
 import com.example.cameraselect.viewmodel.CameraViewModel
@@ -306,6 +309,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val noCropRear by viewModel.noCropRear.collectAsStateWithLifecycle()
 
     val flashMode by viewModel.flashMode.collectAsStateWithLifecycle()
+    val photoFormat by viewModel.photoFormat.collectAsStateWithLifecycle()
 
     val captureMode by viewModel.captureMode.collectAsStateWithLifecycle()
     val isRecording by viewModel.isRecording.collectAsStateWithLifecycle()
@@ -315,12 +319,20 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
 
     var hasPhysicalFlashForSelectedCamera by remember { mutableStateOf(false) }
     var isScreenFlashForCaptureActive by remember { mutableStateOf(false) }
+    var rawUnavailableCameraId by remember { mutableStateOf<String?>(null) }
 
     // Shared tint for header/camera icons while recording dims them consistently.
     val activeIconTint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White
 
     val buttonRotation = rememberDeviceRotation()
     val captureController = remember { CameraCaptureController() }
+
+    // A wide pill rotated sideways needs extra headroom so it never sits under the status bar.
+    val topControlsPadding by animateDpAsState(
+        targetValue = if (isSidewaysRotation(buttonRotation)) 48.dp else 16.dp,
+        animationSpec = tween(durationMillis = 300),
+        label = "topControlsPadding"
+    )
 
     val isTorchScreenFlashActive = (flashMode == FlashMode.TORCH) && !hasPhysicalFlashForSelectedCamera
     val isRecordingScreenFlashActive = isRecording && !hasPhysicalFlashForSelectedCamera && (
@@ -330,6 +342,15 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val isScreenFlashActive = isTorchScreenFlashActive ||
                               isRecordingScreenFlashActive ||
                               isScreenFlashForCaptureActive
+
+    val selectedLensSupportsRaw = remember(allCameras, selectedCameraId, rawUnavailableCameraId) {
+        selectedCameraId != null &&
+            rawUnavailableCameraId != selectedCameraId &&
+            allCameras.firstOrNull { it.id == selectedCameraId }?.supportsRaw == true
+    }
+    val isRawCaptureEnabled = captureMode == CaptureMode.PHOTO &&
+        photoFormat == PhotoFormat.JPEG_PLUS_RAW &&
+        selectedLensSupportsRaw
 
     val currentFacingShowHidden = if (activeFacing == LensFacing.FRONT) showHiddenFront else showHiddenRear
     val currentFacingIsMirrored = if (activeFacing == LensFacing.FRONT) isMirroredFront else isMirroredRear
@@ -429,16 +450,30 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
 
             mediaActionSound.play(MediaActionSound.SHUTTER_CLICK)
 
-            captureController.takePhoto(buttonRotation.toInt()) { uri ->
+            val started = captureController.takePhoto(
+                rotationDegrees = buttonRotation.toInt(),
+                saveRaw = isRawCaptureEnabled
+            ) { jpegUri, rawUri ->
                 if (needsScreenFlash) {
                     isScreenFlashForCaptureActive = false
                 }
-                if (uri != null) {
-                    viewModel.setLastCapturedMedia(uri, isVideo = false)
-                    Toast.makeText(context, "Photo saved", Toast.LENGTH_SHORT).show()
+                if (jpegUri != null) {
+                    viewModel.setLastCapturedMedia(jpegUri, isVideo = false)
+                    val message = when {
+                        !isRawCaptureEnabled -> "Photo saved"
+                        rawUri != null -> "Photo + RAW saved"
+                        else -> "Photo saved (RAW failed)"
+                    }
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Failed to capture photo", Toast.LENGTH_SHORT).show()
                 }
+            }
+            if (!started) {
+                if (needsScreenFlash) {
+                    isScreenFlashForCaptureActive = false
+                }
+                Toast.makeText(context, "Camera is busy", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -521,10 +556,12 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 isNoCrop = currentFacingNoCrop,
                 flashMode = flashMode,
                 deviceRotationDegrees = buttonRotation.toInt(),
+                captureRaw = isRawCaptureEnabled,
                 captureController = captureController,
                 onHasFlashChanged = { hasPhysicalFlash ->
                     hasPhysicalFlashForSelectedCamera = hasPhysicalFlash
                 },
+                onRawUnavailable = { rawUnavailableCameraId = id },
                 modifier = Modifier.fillMaxSize()
             )
         } ?: Box(
@@ -556,7 +593,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(top = 16.dp, start = 16.dp)
+                .padding(top = topControlsPadding, start = 16.dp)
                 .shadow(8.dp, CircleShape)
                 .background(Color.Black.copy(alpha = 0.45f), CircleShape)
                 .size(56.dp)
@@ -603,30 +640,44 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
-                    .padding(top = 18.dp)
+                    .padding(top = topControlsPadding)
                     .rotate(buttonRotation)
             )
         }
 
-        // 6. Top-Right Settings (Cogwheel) Icon (Disabled while recording)
-        IconButton(
-            onClick = { if (!isRecording) viewModel.setSettingsOpen(true) },
-            enabled = !isRecording,
+        // 6. Top-Right Photo Format Selector + Settings (Cogwheel) Icon (Disabled while recording)
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(top = 16.dp, end = 16.dp)
-                .shadow(8.dp, CircleShape)
-                .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                .size(56.dp)
-                .rotate(buttonRotation)
+                .padding(top = topControlsPadding, end = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.85f),
-                modifier = Modifier.size(44.dp)
-            )
+            if (captureMode == CaptureMode.PHOTO && selectedLensSupportsRaw) {
+                PhotoFormatSelector(
+                    currentFormat = photoFormat,
+                    onFormatSelected = { viewModel.setPhotoFormat(it) },
+                    modifier = Modifier.rotate(buttonRotation)
+                )
+            }
+
+            IconButton(
+                onClick = { if (!isRecording) viewModel.setSettingsOpen(true) },
+                enabled = !isRecording,
+                modifier = Modifier
+                    .shadow(8.dp, CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                    .size(56.dp)
+                    .rotate(buttonRotation)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = if (isRecording) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(44.dp)
+                )
+            }
         }
 
         // 7. Bottom Control Overlays (Zoom Buttons, Mode Switcher, Shutter Controls)
@@ -786,6 +837,58 @@ private fun CaptureModeItem(
             fontWeight = FontWeight.Bold,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+        )
+    }
+}
+
+@Composable
+fun PhotoFormatSelector(
+    currentFormat: PhotoFormat,
+    onFormatSelected: (PhotoFormat) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color.Black.copy(alpha = 0.45f),
+        shadowElevation = 8.dp,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PhotoFormatItem(
+                title = "JPEG",
+                isSelected = currentFormat == PhotoFormat.JPEG,
+                onClick = { onFormatSelected(PhotoFormat.JPEG) }
+            )
+            PhotoFormatItem(
+                title = "JPEG + RAW",
+                isSelected = currentFormat == PhotoFormat.JPEG_PLUS_RAW,
+                onClick = { onFormatSelected(PhotoFormat.JPEG_PLUS_RAW) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhotoFormatItem(
+    title: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (isSelected) Color(0xFFFFD700) else Color.Transparent,
+        contentColor = if (isSelected) Color.Black else Color.White.copy(alpha = 0.85f),
+        modifier = Modifier.padding(horizontal = 2.dp)
+    ) {
+        Text(
+            text = title,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
         )
     }
 }
@@ -1027,6 +1130,11 @@ private fun rememberDeviceRotation(): Float {
     return animatedAngle
 }
 
+private fun isSidewaysRotation(rotationDegrees: Float): Boolean {
+    val normalized = ((rotationDegrees % 180f) + 180f) % 180f
+    return normalized in 45f..135f
+}
+
 private fun getTargetRotationAngle(currentAngle: Float, targetOrientation: Int): Float {
     val target = targetOrientation.toFloat()
     var diff = (target - (currentAngle % 360f)) % 360f
@@ -1108,9 +1216,33 @@ private class CameraSessionHolder {
     var cameraId: String = ""
     var characteristics: CameraCharacteristics? = null
 
-    var pendingPhotoCallback: ((ByteArray) -> Unit)? = null
     var isClosed: Boolean = false
     var isOpening: Boolean = false
+
+    var supportsRaw: Boolean = false
+    var rawCaptureEnabled: Boolean = false
+    var rawInSession: Boolean = false
+    var rawImageReader: ImageReader? = null
+    var onRawUnavailable: (() -> Unit)? = null
+
+    private val pendingPhotoLock = Any()
+    private var pendingPhoto: PendingPhotoCapture? = null
+    private var rawReconfigurePending: Boolean = false
+
+    private class PendingPhotoCapture(
+        val wantsRaw: Boolean,
+        val mirrored: Boolean,
+        val jpegOrientation: Int,
+        val onFinished: (Uri?, Uri?) -> Unit
+    ) {
+        var jpegDone: Boolean = false
+        var jpegUri: Uri? = null
+        var rawDone: Boolean = !wantsRaw
+        var rawUri: Uri? = null
+        var rawResult: TotalCaptureResult? = null
+        var rawImage: MediaImage? = null
+        var timeoutToken: Any? = null
+    }
 
     private fun checkFrameLuminance() {
         val now = SystemClock.elapsedRealtime()
@@ -1167,10 +1299,238 @@ private class CameraSessionHolder {
         }
     }
 
-    fun onImageCaptured(bytes: ByteArray) {
-        val cb = pendingPhotoCallback
-        pendingPhotoCallback = null
-        cb?.invoke(bytes)
+    fun onJpegImageCaptured(bytes: ByteArray) {
+        val pending = synchronized(pendingPhotoLock) { pendingPhoto } ?: return
+        val ctx = context
+        val uri = if (ctx != null) {
+            CameraCaptureManager.saveJpegToMediaStore(ctx, bytes, pending.mirrored, pending.jpegOrientation)
+        } else {
+            null
+        }
+        synchronized(pendingPhotoLock) {
+            if (pendingPhoto !== pending || pending.jpegDone) return
+            pending.jpegDone = true
+            pending.jpegUri = uri
+            finishPendingIfCompleteLocked(pending)
+        }
+    }
+
+    private fun finishPendingIfCompleteLocked(pending: PendingPhotoCapture) {
+        if (!pending.jpegDone || (pending.wantsRaw && !pending.rawDone)) return
+        if (pendingPhoto === pending) {
+            pendingPhoto = null
+        }
+        pending.rawImage?.close()
+        pending.rawImage = null
+        pending.rawResult = null
+
+        val jpegUri = pending.jpegUri
+        val rawUri = pending.rawUri
+        val callback = pending.onFinished
+        val ctx = context
+        if (ctx != null) {
+            ContextCompat.getMainExecutor(ctx).execute { callback(jpegUri, rawUri) }
+        } else {
+            callback(jpegUri, rawUri)
+        }
+
+        if (rawReconfigurePending) {
+            rawReconfigurePending = false
+            if (ctx != null) {
+                ContextCompat.getMainExecutor(ctx).execute { restartPreviewSession() }
+            } else {
+                restartPreviewSession()
+            }
+        }
+    }
+
+    private fun onStillCaptureCompleted(result: TotalCaptureResult, pending: PendingPhotoCapture) {
+        synchronized(pendingPhotoLock) {
+            if (pendingPhoto !== pending || !pending.wantsRaw || pending.rawDone) return
+            pending.rawResult = result
+        }
+        finishRawIfReady()
+    }
+
+    private fun onRawImageAvailable(reader: ImageReader) {
+        val image = try {
+            reader.acquireNextImage()
+        } catch (_: Exception) {
+            null
+        } ?: return
+
+        val accepted = synchronized(pendingPhotoLock) {
+            val pending = pendingPhoto
+            if (pending == null || !pending.wantsRaw || pending.rawDone) {
+                false
+            } else {
+                pending.rawImage?.close()
+                pending.rawImage = image
+                true
+            }
+        }
+
+        if (!accepted) {
+            image.close()
+            return
+        }
+        finishRawIfReady()
+    }
+
+    private fun finishRawIfReady() {
+        var pending: PendingPhotoCapture? = null
+        var captureResult: TotalCaptureResult? = null
+        var rawImage: MediaImage? = null
+
+        synchronized(pendingPhotoLock) {
+            val current = pendingPhoto ?: return
+            if (!current.wantsRaw || current.rawDone) return
+            val result = current.rawResult ?: return
+            val image = current.rawImage ?: return
+            val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+            if (timestamp != null && image.timestamp != timestamp) {
+                // Buffer belongs to a different capture; wait for the matching one.
+                image.close()
+                current.rawImage = null
+                return
+            }
+            current.rawResult = null
+            current.rawImage = null
+            pending = current
+            captureResult = result
+            rawImage = image
+        }
+
+        val captured = pending ?: return
+        val result = captureResult ?: return
+        val image = rawImage ?: return
+        val ctx = context
+        val chars = characteristics
+        val uri = try {
+            if (ctx != null && chars != null) {
+                CameraCaptureManager.saveDngToMediaStore(ctx, chars, result, image, captured.jpegOrientation)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("Camera2Preview", "Failed to write RAW photo", e)
+            null
+        } finally {
+            image.close()
+        }
+
+        synchronized(pendingPhotoLock) {
+            if (pendingPhoto !== captured || captured.rawDone) return
+            captured.rawDone = true
+            captured.rawUri = uri
+            finishPendingIfCompleteLocked(captured)
+        }
+    }
+
+    fun ensureRawReader(): ImageReader? {
+        rawImageReader?.let { return it }
+        if (!supportsRaw) return null
+        val chars = characteristics ?: return null
+        val handler = backgroundHandler ?: return null
+        val size = CameraCaptureManager.chooseRawCaptureSize(chars) ?: return null
+        return try {
+            ImageReader.newInstance(size.width, size.height, ImageFormat.RAW_SENSOR, 2).also { reader ->
+                reader.setOnImageAvailableListener({ ir -> onRawImageAvailable(ir) }, handler)
+                rawImageReader = reader
+            }
+        } catch (e: Exception) {
+            Log.e("Camera2Preview", "Could not create RAW ImageReader", e)
+            null
+        }
+    }
+
+    fun updateRawCaptureEnabled(enabled: Boolean) {
+        val effective = supportsRaw && enabled
+        if (effective && ensureRawReader() == null) {
+            if (rawCaptureEnabled) {
+                rawCaptureEnabled = false
+                rawInSession = false
+                onRawUnavailable?.invoke()
+                if (device != null && !isRecording && !isClosed) {
+                    restartPreviewSession()
+                }
+            }
+            return
+        }
+        if (rawCaptureEnabled == effective) return
+        rawCaptureEnabled = effective
+        rawInSession = false
+        if (device != null && !isRecording && !isClosed) {
+            val captureInFlight = synchronized(pendingPhotoLock) {
+                if (pendingPhoto != null) {
+                    rawReconfigurePending = true
+                    true
+                } else {
+                    false
+                }
+            }
+            if (!captureInFlight) {
+                restartPreviewSession()
+            }
+        }
+    }
+
+    fun handleSessionConfigureFailed(): Boolean {
+        if (!rawCaptureEnabled && !rawInSession && rawImageReader == null) {
+            return false
+        }
+        rawCaptureEnabled = false
+        rawInSession = false
+        try { rawImageReader?.close() } catch (_: Exception) {}
+        rawImageReader = null
+        onRawUnavailable?.invoke()
+        if (device != null && !isClosed) {
+            restartPreviewSession()
+        }
+        return true
+    }
+
+    private fun releaseRawReader() {
+        try { rawImageReader?.close() } catch (_: Exception) {}
+        rawImageReader = null
+    }
+
+    private fun scheduleCaptureTimeouts(pending: PendingPhotoCapture) {
+        val handler = backgroundHandler ?: return
+        val token = Any()
+        pending.timeoutToken = token
+
+        // RAW buffer comes from the same capture; give up on it shortly after the shot.
+        handler.postDelayed({
+            synchronized(pendingPhotoLock) {
+                if (pendingPhoto !== pending || pending.timeoutToken !== token) return@postDelayed
+                if (!pending.rawDone) {
+                    pending.rawImage?.close()
+                    pending.rawImage = null
+                    pending.rawResult = null
+                    pending.rawDone = true
+                }
+                if (pending.jpegDone) {
+                    finishPendingIfCompleteLocked(pending)
+                }
+            }
+        }, 3000)
+
+        // Safety net so a missing frame can never leave the shutter permanently busy.
+        handler.postDelayed({
+            synchronized(pendingPhotoLock) {
+                if (pendingPhoto !== pending || pending.timeoutToken !== token) return@postDelayed
+                pending.rawImage?.close()
+                pending.rawImage = null
+                pending.rawResult = null
+                pending.rawDone = true
+                if (!pending.jpegDone) {
+                    pending.jpegDone = true
+                    pending.jpegUri = null
+                }
+                finishPendingIfCompleteLocked(pending)
+            }
+        }, 10000)
     }
 
     fun updateFlash(mode: FlashMode) {
@@ -1202,8 +1562,9 @@ private class CameraSessionHolder {
     fun takePhoto(
         isMirrored: Boolean,
         deviceRotationDegrees: Int,
-        onCaptured: (Uri?) -> Unit
-    ) {
+        saveRaw: Boolean,
+        onCaptured: (Uri?, Uri?) -> Unit
+    ): Boolean {
         val dev = device
         val sess = session
         val reader = imageReader
@@ -1217,20 +1578,32 @@ private class CameraSessionHolder {
         // saved image matches what the user sees in the preview.
         val isFrontCamera = chars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
         val captureMirrored = if (isFrontCamera) !isMirrored else isMirrored
+        val jpegOrientation = if (chars != null) {
+            CameraCaptureManager.computeJpegOrientation(chars, deviceRotationDegrees)
+        } else {
+            0
+        }
+        val rawReader = if (saveRaw && rawCaptureEnabled && rawInSession) ensureRawReader() else null
+
+        val pending = PendingPhotoCapture(
+            wantsRaw = rawReader != null,
+            mirrored = captureMirrored,
+            jpegOrientation = jpegOrientation,
+            onFinished = onCaptured
+        )
+
+        synchronized(pendingPhotoLock) {
+            if (pendingPhoto != null) return false
+            pendingPhoto = pending
+        }
+        scheduleCaptureTimeouts(pending)
 
         if (dev != null && sess != null && reader != null && chars != null && ctx != null) {
-            val jpegOrientation = CameraCaptureManager.computeJpegOrientation(chars, deviceRotationDegrees)
-            pendingPhotoCallback = { bytes ->
-                val uri = CameraCaptureManager.saveJpegToMediaStore(ctx, bytes, captureMirrored, jpegOrientation)
-                ContextCompat.getMainExecutor(ctx).execute {
-                    onCaptured(uri)
-                }
-            }
-
             val doStillCapture = {
                 try {
                     val captureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
                     captureBuilder.addTarget(reader.surface)
+                    rawReader?.let { captureBuilder.addTarget(it.surface) }
                     captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                     applyFlashMode(captureBuilder, flashMode, hasFlash, isStillCapture = true, isDarkScene = isDarkScene)
                     captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
@@ -1243,6 +1616,7 @@ private class CameraSessionHolder {
                             result: TotalCaptureResult
                         ) {
                             super.onCaptureCompleted(session, request, result)
+                            onStillCaptureCompleted(result, pending)
                             if (hasFlash && (flashMode == FlashMode.ON || (flashMode == FlashMode.AUTO && isDarkScene))) {
                                 try {
                                     val cancelBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
@@ -1259,7 +1633,7 @@ private class CameraSessionHolder {
                     }, backgroundHandler)
                 } catch (e: Exception) {
                     Log.e("Camera2Preview", "Failed to capture still photo with ImageReader, trying fallback", e)
-                    fallbackCaptureFromBitmap(isMirrored, deviceRotationDegrees, onCaptured)
+                    fallbackCaptureFromBitmap(captureMirrored, jpegOrientation, pending)
                 }
             }
 
@@ -1308,37 +1682,40 @@ private class CameraSessionHolder {
                 doStillCapture()
             }
         } else {
-            fallbackCaptureFromBitmap(isMirrored, deviceRotationDegrees, onCaptured)
+            fallbackCaptureFromBitmap(captureMirrored, jpegOrientation, pending)
         }
+        return true
     }
 
     private fun fallbackCaptureFromBitmap(
-        isMirrored: Boolean,
-        deviceRotationDegrees: Int,
-        onCaptured: (Uri?) -> Unit
+        captureMirrored: Boolean,
+        jpegOrientation: Int,
+        pending: PendingPhotoCapture
     ) {
-        val ctx = context ?: return onCaptured(null)
+        val ctx = context
         val bitmap = textureView?.bitmap
-        val chars = characteristics
-        val rotationDegrees = if (chars != null) {
-            CameraCaptureManager.computeJpegOrientation(chars, deviceRotationDegrees)
-        } else 0
+        val handler = backgroundHandler
+        if (ctx == null || bitmap == null || handler == null) {
+            completeFallback(pending, null)
+            return
+        }
+        handler.post {
+            val uri = CameraCaptureManager.saveBitmapToMediaStore(ctx, bitmap, captureMirrored, jpegOrientation)
+            completeFallback(pending, uri)
+        }
+    }
 
-        // Same front-camera inversion as takePhoto – the bitmap from the
-        // TextureView is already transformed by configureTransform (including
-        // any mirror flip), so for front cameras we invert isMirrored.
-        val isFrontCamera = chars?.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
-        val captureMirrored = if (isFrontCamera) !isMirrored else isMirrored
-
-        if (bitmap != null) {
-            backgroundHandler?.post {
-                val uri = CameraCaptureManager.saveBitmapToMediaStore(ctx, bitmap, captureMirrored, rotationDegrees)
-                ContextCompat.getMainExecutor(ctx).execute {
-                    onCaptured(uri)
-                }
-            }
-        } else {
-            onCaptured(null)
+    private fun completeFallback(pending: PendingPhotoCapture, uri: Uri?) {
+        synchronized(pendingPhotoLock) {
+            if (pendingPhoto !== pending) return
+            pending.rawImage?.close()
+            pending.rawImage = null
+            pending.rawResult = null
+            pending.rawDone = true
+            pending.rawUri = null
+            pending.jpegDone = true
+            pending.jpegUri = uri
+            finishPendingIfCompleteLocked(pending)
         }
     }
 
@@ -1572,8 +1949,18 @@ private class CameraSessionHolder {
             applyFlashMode(previewBuilder, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
             previewRequestBuilder = previewBuilder
 
+            val rawReader = if (rawCaptureEnabled) ensureRawReader() else null
+            if (rawCaptureEnabled && rawReader == null) {
+                rawCaptureEnabled = false
+                onRawUnavailable?.invoke()
+            }
+            rawInSession = rawReader != null
+
             val outputConfigs = mutableListOf(OutputConfiguration(prevSurface))
             imageReader?.let {
+                outputConfigs.add(OutputConfiguration(it.surface))
+            }
+            rawReader?.let {
                 outputConfigs.add(OutputConfiguration(it.surface))
             }
 
@@ -1603,6 +1990,9 @@ private class CameraSessionHolder {
                                 backgroundHandler
                             )
                             session = newSession
+                            if (!rawCaptureEnabled) {
+                                releaseRawReader()
+                            }
                         } catch (e: Exception) {
                             Log.e("Camera2Preview", "Failed to restart preview repeating request", e)
                         }
@@ -1610,6 +2000,9 @@ private class CameraSessionHolder {
 
                     override fun onConfigureFailed(failedSession: CameraCaptureSession) {
                         Log.e("Camera2Preview", "Failed to restart preview session")
+                        if (!handleSessionConfigureFailed()) {
+                            Log.e("Camera2Preview", "Preview session could not be restored")
+                        }
                     }
                 }
             )
@@ -1656,6 +2049,18 @@ private class CameraSessionHolder {
             imageReader?.close()
         } catch (_: Exception) {}
         imageReader = null
+        releaseRawReader()
+
+        synchronized(pendingPhotoLock) {
+            pendingPhoto?.let { pending ->
+                pending.rawImage?.close()
+                pending.rawImage = null
+                pending.rawResult = null
+                pending.rawDone = true
+                pending.jpegDone = true
+                finishPendingIfCompleteLocked(pending)
+            }
+        }
 
         try {
             backgroundThread?.quitSafely()
@@ -1676,8 +2081,10 @@ fun Camera2PreviewView(
     isNoCrop: Boolean,
     flashMode: FlashMode,
     deviceRotationDegrees: Int = 0,
+    captureRaw: Boolean = false,
     captureController: CameraCaptureController,
     onHasFlashChanged: (Boolean) -> Unit = {},
+    onRawUnavailable: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1704,9 +2111,10 @@ fun Camera2PreviewView(
                 captureController.isDarkSceneState.value = dark
             }
             captureController.isDarkSceneState.value = holder.isDarkScene
-            captureController.takePhotoAction = { rotationDegrees, onCaptured ->
-                holder.takePhoto(isMirrored, rotationDegrees, onCaptured)
+            captureController.takePhotoAction = { rotationDegrees, saveRaw, onCaptured ->
+                holder.takePhoto(isMirrored, rotationDegrees, saveRaw, onCaptured)
             }
+            holder.onRawUnavailable = onRawUnavailable
             captureController.startRecordingAction = { rotationDegrees, onStarted, onError ->
                 holder.startRecording(rotationDegrees, onStarted, onError)
             }
@@ -1730,7 +2138,7 @@ fun Camera2PreviewView(
                 TextureView(ctx).apply {
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, this@apply, surface, width, height, holder, deviceRotationDegrees)
+                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this@apply, surface, width, height, holder, deviceRotationDegrees)
                         }
 
                         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
@@ -1750,7 +2158,7 @@ fun Camera2PreviewView(
                     if (isAvailable && width > 0 && height > 0) {
                         val surface = surfaceTexture
                         if (surface != null) {
-                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, this, surface, width, height, holder, deviceRotationDegrees)
+                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this, surface, width, height, holder, deviceRotationDegrees)
                         }
                     }
                 }
@@ -1761,6 +2169,8 @@ fun Camera2PreviewView(
                         configureTransform(isMirrored, isNoCrop, textureView, textureView.width, textureView.height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
                     }
                     holder.updateFlash(flashMode)
+                    holder.onRawUnavailable = onRawUnavailable
+                    holder.updateRawCaptureEnabled(captureRaw)
                 }
             },
             modifier = modifier
@@ -1782,6 +2192,7 @@ private fun openCameraSession(
     isMirrored: Boolean,
     isNoCrop: Boolean,
     flashMode: FlashMode,
+    captureRaw: Boolean,
     textureView: TextureView,
     surfaceTexture: SurfaceTexture,
     width: Int,
@@ -1802,6 +2213,8 @@ private fun openCameraSession(
 
         val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
         holder.hasFlash = hasFlash
+        holder.supportsRaw = CameraCaptureManager.supportsRawCapture(characteristics)
+        holder.rawCaptureEnabled = captureRaw && holder.supportsRaw
 
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
         holder.sensorOrientation = sensorOrientation
@@ -1829,7 +2242,7 @@ private fun openCameraSession(
                         val buffer = image.planes[0].buffer
                         val bytes = ByteArray(buffer.remaining())
                         buffer.get(bytes)
-                        holder.onImageCaptured(bytes)
+                        holder.onJpegImageCaptured(bytes)
                     } finally {
                         image.close()
                     }
@@ -1840,6 +2253,10 @@ private fun openCameraSession(
             null
         }
         holder.imageReader = reader
+
+        val rawReader = if (holder.rawCaptureEnabled) holder.ensureRawReader() else null
+        holder.rawCaptureEnabled = rawReader != null
+        holder.rawInSession = rawReader != null
 
         cameraManager.openCamera(
             cameraId,
@@ -1863,6 +2280,9 @@ private fun openCameraSession(
 
                         val outputConfigs = mutableListOf(OutputConfiguration(previewSurface))
                         reader?.let {
+                            outputConfigs.add(OutputConfiguration(it.surface))
+                        }
+                        rawReader?.let {
                             outputConfigs.add(OutputConfiguration(it.surface))
                         }
 
@@ -1899,7 +2319,12 @@ private fun openCameraSession(
 
                                 override fun onConfigureFailed(session: CameraCaptureSession) {
                                     Log.e("Camera2Preview", "Session configuration failed for camera $cameraId")
-                                    Toast.makeText(context, "Camera session failed", Toast.LENGTH_SHORT).show()
+                                    if (holder.rawCaptureEnabled) {
+                                        Toast.makeText(context, "RAW is not available for this lens — retrying with JPEG", Toast.LENGTH_SHORT).show()
+                                        holder.handleSessionConfigureFailed()
+                                    } else {
+                                        Toast.makeText(context, "Camera session failed", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         )

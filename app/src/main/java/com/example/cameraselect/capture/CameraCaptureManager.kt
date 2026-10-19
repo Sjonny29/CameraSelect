@@ -9,6 +9,10 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.DngCreator
+import android.hardware.camera2.TotalCaptureResult
+import android.media.ExifInterface
+import android.media.Image
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -48,6 +52,21 @@ object CameraCaptureManager {
         } else {
             jpegSizes.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: jpegSizes[0]
         }
+    }
+
+    fun supportsRawCapture(characteristics: CameraCharacteristics): Boolean {
+        val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+        if (capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW) != true) {
+            return false
+        }
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+        return map.getOutputSizes(ImageFormat.RAW_SENSOR)?.isNotEmpty() == true
+    }
+
+    fun chooseRawCaptureSize(characteristics: CameraCharacteristics): Size? {
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
+        return map.getOutputSizes(ImageFormat.RAW_SENSOR)
+            ?.maxByOrNull { it.width.toLong() * it.height.toLong() }
     }
 
     private fun landscapeSize(size: Size): Size =
@@ -191,6 +210,53 @@ object CameraCaptureManager {
             null
         }
     }
+
+    fun saveDngToMediaStore(
+        context: Context,
+        characteristics: CameraCharacteristics,
+        result: TotalCaptureResult,
+        image: Image,
+        rotationDegrees: Int
+    ): Uri? {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val filename = "IMG_$timestamp.dng"
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/CameraSelect")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            ?: return null
+
+        return try {
+            DngCreator(characteristics, result).use { dngCreator ->
+                dngCreator.setOrientation(exifOrientationForDegrees(rotationDegrees))
+                dngCreator.setDescription("CameraSelect RAW")
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    dngCreator.writeImage(stream, image)
+                    stream.flush()
+                } ?: throw IllegalStateException("Could not open DNG output stream")
+            }
+            contentValues.clear()
+            contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, contentValues, null, null)
+            uri
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save DNG to MediaStore", e)
+            context.contentResolver.delete(uri, null, null)
+            null
+        }
+    }
+
+    private fun exifOrientationForDegrees(rotationDegrees: Int): Int =
+        when (((rotationDegrees % 360) + 360) % 360) {
+            90 -> ExifInterface.ORIENTATION_ROTATE_90
+            180 -> ExifInterface.ORIENTATION_ROTATE_180
+            270 -> ExifInterface.ORIENTATION_ROTATE_270
+            else -> ExifInterface.ORIENTATION_NORMAL
+        }
 
     fun saveBitmapToMediaStore(
         context: Context,

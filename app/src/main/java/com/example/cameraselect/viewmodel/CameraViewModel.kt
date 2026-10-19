@@ -8,6 +8,7 @@ import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.CaptureMode
 import com.example.cameraselect.model.FlashMode
 import com.example.cameraselect.model.LensFacing
+import com.example.cameraselect.model.PhotoFormat
 import com.example.cameraselect.repository.CameraRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +44,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _flashMode = MutableStateFlow(repository.getFlashMode())
     val flashMode: StateFlow<FlashMode> = _flashMode.asStateFlow()
+
+    private val _photoFormat = MutableStateFlow(repository.getPhotoFormat())
+    val photoFormat: StateFlow<PhotoFormat> = _photoFormat.asStateFlow()
 
     private val _enabledCameraIds = MutableStateFlow<Set<String>>(emptySet())
     val enabledCameraIds: StateFlow<Set<String>> = _enabledCameraIds.asStateFlow()
@@ -129,6 +133,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         _flashMode.value = nextMode
         repository.setFlashMode(nextMode)
+    }
+
+    fun setPhotoFormat(format: PhotoFormat) {
+        _photoFormat.value = format
+        repository.setPhotoFormat(format)
     }
 
     fun toggleCameraEnabled(cameraId: String) {
