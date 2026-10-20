@@ -17,6 +17,7 @@ import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.Image as MediaImage
@@ -31,6 +32,7 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import android.util.Size
+import android.view.HapticFeedbackConstants
 import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.TextureView
@@ -39,6 +41,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -52,6 +56,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,7 +83,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -97,6 +101,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -108,8 +113,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -594,7 +601,6 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(top = topControlsPadding, start = 16.dp)
-                .shadow(8.dp, CircleShape)
                 .background(Color.Black.copy(alpha = 0.45f), CircleShape)
                 .size(56.dp)
                 .rotate(buttonRotation)
@@ -666,7 +672,6 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 onClick = { if (!isRecording) viewModel.setSettingsOpen(true) },
                 enabled = !isRecording,
                 modifier = Modifier
-                    .shadow(8.dp, CircleShape)
                     .background(Color.Black.copy(alpha = 0.45f), CircleShape)
                     .size(56.dp)
                     .rotate(buttonRotation)
@@ -754,7 +759,6 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     onClick = { if (!isRecording) viewModel.toggleActiveFacing() },
                     enabled = !isRecording,
                     modifier = Modifier
-                        .shadow(8.dp, CircleShape)
                         .background(Color.Black.copy(alpha = 0.45f), CircleShape)
                         .size(64.dp)
                         .rotate(buttonRotation)
@@ -798,7 +802,6 @@ fun CaptureModeSelector(
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = Color.Black.copy(alpha = 0.45f),
-        shadowElevation = 8.dp,
         modifier = modifier
     ) {
         Row(
@@ -848,9 +851,8 @@ fun PhotoFormatSelector(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = CircleShape,
         color = Color.Black.copy(alpha = 0.45f),
-        shadowElevation = 8.dp,
         modifier = modifier
     ) {
         Row(
@@ -879,7 +881,7 @@ private fun PhotoFormatItem(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
+        shape = CircleShape,
         color = if (isSelected) Color(0xFFFFD700) else Color.Transparent,
         contentColor = if (isSelected) Color.Black else Color.White.copy(alpha = 0.85f),
         modifier = Modifier.padding(horizontal = 2.dp)
@@ -917,7 +919,6 @@ fun CaptureShutterButton(
         CaptureMode.PHOTO -> {
             Box(
                 modifier = modifier
-                    .shadow(8.dp, CircleShape)
                     .background(Color.Black.copy(alpha = 0.35f), CircleShape)
                     .size(80.dp)
                     .border(4.dp, Color.White, CircleShape)
@@ -935,7 +936,6 @@ fun CaptureShutterButton(
             if (!isRecording) {
                 Box(
                     modifier = modifier
-                        .shadow(8.dp, CircleShape)
                         .background(Color.Black.copy(alpha = 0.35f), CircleShape)
                         .size(80.dp)
                         .border(4.dp, Color.White, CircleShape)
@@ -951,7 +951,6 @@ fun CaptureShutterButton(
             } else {
                 Box(
                     modifier = modifier
-                        .shadow(8.dp, CircleShape)
                         .background(Color.Black.copy(alpha = 0.35f), CircleShape)
                         .size((80 * pulseScale).dp)
                         .border(4.dp, Color(0xFFE53935), CircleShape)
@@ -980,7 +979,6 @@ fun GalleryThumbnailButton(
         onClick = onClick,
         shape = CircleShape,
         color = Color.Black.copy(alpha = 0.5f),
-        shadowElevation = 8.dp,
         modifier = modifier
             .size(56.dp)
             .border(2.dp, Color.White.copy(alpha = 0.85f), CircleShape)
@@ -1042,7 +1040,6 @@ fun RecordingTimerBadge(
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = Color.Black.copy(alpha = 0.65f),
-        shadowElevation = 8.dp,
         modifier = modifier
     ) {
         Row(
@@ -1082,7 +1079,6 @@ fun LensZoomButton(
         shape = CircleShape,
         color = if (isSelected) Color.White else Color.Black.copy(alpha = if (enabled) 0.45f else 0.2f),
         contentColor = if (isSelected) Color.Black else Color.White.copy(alpha = if (enabled) 1f else 0.4f),
-        shadowElevation = 8.dp,
         modifier = modifier.size(if (isSelected) 60.dp else 52.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -1201,7 +1197,9 @@ private class CameraSessionHolder {
     var sensorOrientation: Int = 90
     var previewSize: Size? = null
     var previewSurface: Surface? = null
+    var surfaceTexture: SurfaceTexture? = null
     var textureView: TextureView? = null
+    var viewTransform: Matrix = Matrix()
     var imageReader: ImageReader? = null
     var backgroundThread: HandlerThread? = null
     var backgroundHandler: Handler? = null
@@ -1211,6 +1209,23 @@ private class CameraSessionHolder {
     var currentRecordingUri: Uri? = null
     var isRecording: Boolean = false
     var recordingStartTime: Long = 0L
+    var videoRequestBuilder: CaptureRequest.Builder? = null
+
+    // Tap-to-focus / tap-to-meter state
+    var onFocusStateChanged: ((Boolean) -> Unit)? = null
+    var supportsAutoFocus: Boolean = false
+    var supportsAfRegions: Boolean = false
+    var supportsAeRegions: Boolean = false
+    var afTriggerSupported: Boolean = false
+    var tapAfMode: Int = CaptureRequest.CONTROL_AF_MODE_AUTO
+    var continuousAfMode: Int = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+    var videoAfMode: Int = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+    var previewAfMode: Int = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+    var afRect: MeteringRectangle? = null
+    var aeRect: MeteringRectangle? = null
+    @Volatile var isAfLocked: Boolean = false
+    @Volatile var isTapFocusActive: Boolean = false
+    @Volatile private var afToken: Int = 0
 
     var context: Context? = null
     var cameraId: String = ""
@@ -1297,6 +1312,264 @@ private class CameraSessionHolder {
                 onDarkSceneChanged?.invoke(newDarkScene)
             }
         }
+    }
+
+    fun configureFocusCapabilities(chars: CameraCharacteristics) {
+        val modes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.toSet() ?: emptySet()
+
+        supportsAutoFocus = modes.any {
+            it == CaptureRequest.CONTROL_AF_MODE_AUTO ||
+                it == CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE ||
+                it == CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+        }
+        afTriggerSupported = supportsAutoFocus
+
+        tapAfMode = when {
+            CaptureRequest.CONTROL_AF_MODE_AUTO in modes -> CaptureRequest.CONTROL_AF_MODE_AUTO
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE in modes -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO in modes -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+            else -> CaptureRequest.CONTROL_AF_MODE_OFF
+        }
+        continuousAfMode = when {
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE in modes -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO in modes -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+            CaptureRequest.CONTROL_AF_MODE_AUTO in modes -> CaptureRequest.CONTROL_AF_MODE_AUTO
+            else -> CaptureRequest.CONTROL_AF_MODE_OFF
+        }
+        videoAfMode = when {
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO in modes -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+            else -> continuousAfMode
+        }
+
+        supportsAfRegions = supportsAutoFocus &&
+            (chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0) > 0
+        supportsAeRegions =
+            (chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0) > 0
+
+        previewAfMode = continuousAfMode
+    }
+
+    fun applyFocusMetering(builder: CaptureRequest.Builder) {
+        if (supportsAutoFocus) {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, previewAfMode)
+        }
+        if (supportsAfRegions) {
+            afRect?.let { builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it)) }
+        }
+        if (supportsAeRegions) {
+            aeRect?.let { builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
+        }
+    }
+
+    fun createRepeatingCallback(forRecording: Boolean): CameraCaptureSession.CaptureCallback =
+        object : CameraCaptureSession.CaptureCallback() {
+            override fun onCaptureCompleted(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                result: TotalCaptureResult
+            ) {
+                super.onCaptureCompleted(session, request, result)
+                updateAEState(result)
+                updateAFState(result)
+                if (forRecording && isRecording && hasFlash && flashMode == FlashMode.AUTO) {
+                    videoRequestBuilder?.let { checkAndUpdateRecordingFlash(session, it) }
+                }
+            }
+        }
+
+    fun updateAFState(result: TotalCaptureResult) {
+        if (!supportsAutoFocus || !isTapFocusActive) return
+        when (result.get(CaptureResult.CONTROL_AF_STATE)) {
+            CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+            CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> {
+                if (!isAfLocked) {
+                    isAfLocked = true
+                    notifyFocusState(true)
+                    val token = afToken
+                    backgroundHandler?.postDelayed({
+                        if (token == afToken && isAfLocked) {
+                            resetToContinuousFocus()
+                        }
+                    }, 3000)
+                }
+            }
+            else -> Unit
+        }
+    }
+
+    private fun notifyFocusState(locked: Boolean) {
+        val ctx = context
+        if (ctx != null) {
+            ContextCompat.getMainExecutor(ctx).execute { onFocusStateChanged?.invoke(locked) }
+        } else {
+            onFocusStateChanged?.invoke(locked)
+        }
+    }
+
+    /**
+     * Maps a tap in view coordinates through the TextureView transform and the
+     * SurfaceTexture transform to normalized buffer coordinates.
+     */
+    private fun mapTapToBufferUv(
+        tapX: Float,
+        tapY: Float,
+        viewWidth: Int,
+        viewHeight: Int,
+        surfaceTexture: SurfaceTexture
+    ): Pair<Float, Float>? {
+        val inverse = Matrix()
+        if (!viewTransform.invert(inverse)) return null
+
+        val point = floatArrayOf(tapX, tapY)
+        inverse.mapPoints(point)
+
+        val s = point[0] / viewWidth
+        val t = point[1] / viewHeight
+        if (s < 0f || s > 1f || t < 0f || t > 1f) return null
+
+        val matrix = FloatArray(16)
+        try {
+            surfaceTexture.getTransformMatrix(matrix)
+        } catch (e: Exception) {
+            Log.w("Camera2Preview", "Could not read SurfaceTexture transform", e)
+            return s to t
+        }
+        if (matrix.all { it == 0f }) return s to t
+
+        val w = matrix[3] * s + matrix[7] * t + matrix[15]
+        if (kotlin.math.abs(w) < 1e-6f) return s to t
+
+        val bufferU = (matrix[0] * s + matrix[4] * t + matrix[12]) / w
+        val bufferV = (matrix[1] * s + matrix[5] * t + matrix[13]) / w
+        return bufferU.coerceIn(0f, 1f) to bufferV.coerceIn(0f, 1f)
+    }
+
+    private fun meteringRectAround(
+        active: android.graphics.Rect,
+        centerX: Float,
+        centerY: Float,
+        halfSize: Int
+    ): MeteringRectangle {
+        val left = (centerX - halfSize).toInt().coerceIn(active.left, active.right - 1)
+        val top = (centerY - halfSize).toInt().coerceIn(active.top, active.bottom - 1)
+        val right = (centerX + halfSize).toInt().coerceIn(left + 1, active.right)
+        val bottom = (centerY + halfSize).toInt().coerceIn(top + 1, active.bottom)
+        return MeteringRectangle(
+            left,
+            top,
+            right - left,
+            bottom - top,
+            MeteringRectangle.METERING_WEIGHT_MAX
+        )
+    }
+
+    /**
+     * Applies AF + AE metering at the tapped point. Returns false when the tap
+     * falls outside the visible preview (e.g. the letterbox bars in no-crop mode).
+     */
+    fun tapToFocus(tapX: Float, tapY: Float): Boolean {
+        val view = textureView ?: return false
+        val st = surfaceTexture ?: return false
+        val chars = characteristics ?: return false
+        val active = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return false
+        val width = view.width
+        val height = view.height
+        if (width <= 0 || height <= 0) return false
+
+        val uv = mapTapToBufferUv(tapX, tapY, width, height, st) ?: return false
+        if (!supportsAutoFocus && !supportsAeRegions) return false
+
+        val centerX = active.left + uv.first * active.width()
+        val centerY = active.top + uv.second * active.height()
+        val shortSide = minOf(active.width(), active.height())
+        val afHalf = (shortSide * 0.06f).toInt().coerceAtLeast(1)
+        val aeHalf = (shortSide * 0.12f).toInt().coerceAtLeast(1)
+
+        afRect = meteringRectAround(active, centerX, centerY, afHalf)
+        aeRect = meteringRectAround(active, centerX, centerY, aeHalf)
+        isAfLocked = false
+        isTapFocusActive = supportsAutoFocus
+        afToken++
+        val token = afToken
+
+        notifyFocusState(false)
+
+        val builder = if (isRecording) videoRequestBuilder else previewRequestBuilder
+        val sess = session
+        if (builder != null && sess != null) {
+            try {
+                if (supportsAutoFocus) {
+                    previewAfMode = tapAfMode
+                    applyFocusMetering(builder)
+                    if (afTriggerSupported) {
+                        builder.set(
+                            CaptureRequest.CONTROL_AF_TRIGGER,
+                            CaptureRequest.CONTROL_AF_TRIGGER_START
+                        )
+                        sess.capture(builder.build(), null, backgroundHandler)
+                        builder.set(
+                            CaptureRequest.CONTROL_AF_TRIGGER,
+                            CaptureRequest.CONTROL_AF_TRIGGER_IDLE
+                        )
+                    }
+                } else {
+                    applyFocusMetering(builder)
+                }
+
+                sess.setRepeatingRequest(
+                    builder.build(),
+                    createRepeatingCallback(forRecording = isRecording),
+                    backgroundHandler
+                )
+            } catch (e: Exception) {
+                Log.e("Camera2Preview", "Failed to apply tap to focus", e)
+            }
+
+            // Safety net: if AF never reports a lock, fall back to continuous AF.
+            if (supportsAutoFocus) {
+                backgroundHandler?.postDelayed({
+                    if (token == afToken && isTapFocusActive && !isAfLocked) {
+                        resetToContinuousFocus()
+                    }
+                }, 2500)
+            }
+        }
+
+        return true
+    }
+
+    private fun resetToContinuousFocus() {
+        isTapFocusActive = false
+        isAfLocked = false
+
+        val sess = session ?: return
+        val builder = (if (isRecording) videoRequestBuilder else previewRequestBuilder) ?: return
+        try {
+            if (supportsAutoFocus) {
+                previewAfMode = if (isRecording) videoAfMode else continuousAfMode
+                applyFocusMetering(builder)
+                if (afTriggerSupported) {
+                    builder.set(
+                        CaptureRequest.CONTROL_AF_TRIGGER,
+                        CaptureRequest.CONTROL_AF_TRIGGER_CANCEL
+                    )
+                    sess.capture(builder.build(), null, backgroundHandler)
+                    builder.set(
+                        CaptureRequest.CONTROL_AF_TRIGGER,
+                        CaptureRequest.CONTROL_AF_TRIGGER_IDLE
+                    )
+                }
+            }
+            sess.setRepeatingRequest(
+                builder.build(),
+                createRepeatingCallback(forRecording = isRecording),
+                backgroundHandler
+            )
+        } catch (e: Exception) {
+            Log.e("Camera2Preview", "Failed to return to continuous focus", e)
+        }
+
+        notifyFocusState(false)
     }
 
     fun onJpegImageCaptured(bytes: ByteArray) {
@@ -1540,18 +1813,10 @@ private class CameraSessionHolder {
         if (isClosed || isRecording) return
         try {
             applyFlashMode(builder, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+            applyFocusMetering(builder)
             sess.setRepeatingRequest(
                 builder.build(),
-                object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(
-                        session: CameraCaptureSession,
-                        request: CaptureRequest,
-                        result: TotalCaptureResult
-                    ) {
-                        super.onCaptureCompleted(session, request, result)
-                        updateAEState(result)
-                    }
-                },
+                createRepeatingCallback(forRecording = false),
                 backgroundHandler
             )
         } catch (e: Exception) {
@@ -1604,8 +1869,8 @@ private class CameraSessionHolder {
                     val captureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
                     captureBuilder.addTarget(reader.surface)
                     rawReader?.let { captureBuilder.addTarget(it.surface) }
-                    captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                     applyFlashMode(captureBuilder, flashMode, hasFlash, isStillCapture = true, isDarkScene = isDarkScene)
+                    applyFocusMetering(captureBuilder)
                     captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
                     captureBuilder.set(CaptureRequest.JPEG_QUALITY, 95.toByte())
 
@@ -1622,6 +1887,7 @@ private class CameraSessionHolder {
                                     val cancelBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                                         previewSurface?.let { addTarget(it) }
                                         applyFlashMode(this, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+                                        applyFocusMetering(this)
                                         set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
                                     }
                                     session.capture(cancelBuilder.build(), null, backgroundHandler)
@@ -1646,6 +1912,7 @@ private class CameraSessionHolder {
                     val precaptureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                         previewSurface?.let { addTarget(it) }
                         applyFlashMode(this, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+                        applyFocusMetering(this)
                         set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
                     }
                     var captured = false
@@ -1778,6 +2045,12 @@ private class CameraSessionHolder {
                             val recordBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
                             recordBuilder.addTarget(prevSurface)
                             recordBuilder.addTarget(recorder.surface)
+                            videoRequestBuilder = recordBuilder
+
+                            if (supportsAutoFocus && !isTapFocusActive) {
+                                previewAfMode = videoAfMode
+                            }
+                            applyFocusMetering(recordBuilder)
 
                             val shouldTorch = hasFlash && (
                                 flashMode == FlashMode.ON ||
@@ -1795,21 +2068,11 @@ private class CameraSessionHolder {
                                 isTorchOnDuringRecording = false
                             }
 
-                            val captureCallback = object : CameraCaptureSession.CaptureCallback() {
-                                override fun onCaptureCompleted(
-                                    session: CameraCaptureSession,
-                                    request: CaptureRequest,
-                                    result: TotalCaptureResult
-                                ) {
-                                    super.onCaptureCompleted(session, request, result)
-                                    updateAEState(result)
-                                    if (isRecording && hasFlash && flashMode == FlashMode.AUTO) {
-                                        checkAndUpdateRecordingFlash(session, recordBuilder)
-                                    }
-                                }
-                            }
-
-                            newSession.setRepeatingRequest(recordBuilder.build(), captureCallback, backgroundHandler)
+                            newSession.setRepeatingRequest(
+                                recordBuilder.build(),
+                                createRepeatingCallback(forRecording = true),
+                                backgroundHandler
+                            )
                             recorder.start()
                             isRecording = true
                             recordingStartTime = SystemClock.elapsedRealtime()
@@ -1845,20 +2108,11 @@ private class CameraSessionHolder {
             val flashValue = if (shouldTorch) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF
             recordBuilder.set(CaptureRequest.FLASH_MODE, flashValue)
             try {
-                val captureCallback = object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureCompleted(
-                        session: CameraCaptureSession,
-                        request: CaptureRequest,
-                        result: TotalCaptureResult
-                    ) {
-                        super.onCaptureCompleted(session, request, result)
-                        updateAEState(result)
-                        if (isRecording && hasFlash && flashMode == FlashMode.AUTO) {
-                            checkAndUpdateRecordingFlash(session, recordBuilder)
-                        }
-                    }
-                }
-                session.setRepeatingRequest(recordBuilder.build(), captureCallback, backgroundHandler)
+                session.setRepeatingRequest(
+                    recordBuilder.build(),
+                    createRepeatingCallback(forRecording = true),
+                    backgroundHandler
+                )
             } catch (e: Exception) {
                 Log.e("Camera2Preview", "Failed to update torch during video recording", e)
             }
@@ -1867,6 +2121,7 @@ private class CameraSessionHolder {
 
     private fun cleanUpFailedRecording() {
         isRecording = false
+        videoRequestBuilder = null
         try { mediaRecorder?.reset() } catch (_: Exception) {}
         try { mediaRecorder?.release() } catch (_: Exception) {}
         mediaRecorder = null
@@ -1890,6 +2145,13 @@ private class CameraSessionHolder {
         val uri = currentRecordingUri
 
         isRecording = false
+
+        videoRequestBuilder = null
+        if (supportsAutoFocus) {
+            previewAfMode = continuousAfMode
+        }
+        isTapFocusActive = false
+        isAfLocked = false
 
         backgroundHandler?.post {
             val elapsed = SystemClock.elapsedRealtime() - recordingStartTime
@@ -1947,6 +2209,7 @@ private class CameraSessionHolder {
             val previewBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             previewBuilder.addTarget(prevSurface)
             applyFlashMode(previewBuilder, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+            applyFocusMetering(previewBuilder)
             previewRequestBuilder = previewBuilder
 
             val rawReader = if (rawCaptureEnabled) ensureRawReader() else null
@@ -1977,16 +2240,7 @@ private class CameraSessionHolder {
                         try {
                             newSession.setRepeatingRequest(
                                 previewBuilder.build(),
-                                object : CameraCaptureSession.CaptureCallback() {
-                                    override fun onCaptureCompleted(
-                                        session: CameraCaptureSession,
-                                        request: CaptureRequest,
-                                        result: TotalCaptureResult
-                                    ) {
-                                        super.onCaptureCompleted(session, request, result)
-                                        updateAEState(result)
-                                    }
-                                },
+                                createRepeatingCallback(forRecording = false),
                                 backgroundHandler
                             )
                             session = newSession
@@ -2068,6 +2322,14 @@ private class CameraSessionHolder {
         backgroundThread = null
         backgroundHandler = null
 
+        afToken++
+        afRect = null
+        aeRect = null
+        isTapFocusActive = false
+        isAfLocked = false
+        videoRequestBuilder = null
+        surfaceTexture = null
+        viewTransform.reset()
         textureView = null
         previewSurface = null
     }
@@ -2124,63 +2386,156 @@ fun Camera2PreviewView(
             captureController.isDarkSceneAction = {
                 holder.isDarkScene
             }
+            holder.onFocusStateChanged = { locked ->
+                captureController.isFocusLockedState.value = locked
+            }
+            captureController.tapToFocusAction = { x, y -> holder.tapToFocus(x, y) }
             onDispose {
                 holder.onDarkSceneChanged = null
+                holder.onFocusStateChanged = null
                 captureController.takePhotoAction = null
                 captureController.startRecordingAction = null
                 captureController.stopRecordingAction = null
                 captureController.isDarkSceneAction = null
+                captureController.tapToFocusAction = null
+                captureController.isFocusLockedState.value = false
             }
         }
 
-        AndroidView(
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this@apply, surface, width, height, holder, deviceRotationDegrees)
+        var focusPoint by remember(cameraId, isNoCrop) { mutableStateOf<Offset?>(null) }
+        var focusTick by remember(cameraId, isNoCrop) { mutableStateOf(0) }
+        val ringScale = remember(cameraId, isNoCrop) { Animatable(1f) }
+        val ringAlpha = remember(cameraId, isNoCrop) { Animatable(0f) }
+        val view = LocalView.current
+
+        LaunchedEffect(focusTick) {
+            if (focusTick == 0) return@LaunchedEffect
+            ringScale.snapTo(1.35f)
+            ringAlpha.snapTo(1f)
+            ringScale.animateTo(1f, tween(durationMillis = 260, easing = FastOutSlowInEasing))
+            delay(900)
+            ringAlpha.animateTo(0f, tween(durationMillis = 420))
+            focusPoint = null
+        }
+
+        Box(modifier = modifier) {
+            AndroidView(
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                                openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this@apply, surface, width, height, holder, deviceRotationDegrees)
+                            }
+
+                            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                                holder.previewSize?.let { previewSize ->
+                                    holder.viewTransform = configureTransform(isMirrored, isNoCrop, this@apply, width, height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
+                                }
+                            }
+
+                            override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                                holder.close()
+                                return true
+                            }
+
+                            override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
                         }
 
-                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                            holder.previewSize?.let { previewSize ->
-                                configureTransform(isMirrored, isNoCrop, this@apply, width, height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
+                        if (isAvailable && width > 0 && height > 0) {
+                            val surface = surfaceTexture
+                            if (surface != null) {
+                                openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this, surface, width, height, holder, deviceRotationDegrees)
                             }
                         }
-
-                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            holder.close()
-                            return true
+                    }
+                },
+                update = { textureView ->
+                    if (textureView.width > 0 && textureView.height > 0) {
+                        holder.previewSize?.let { previewSize ->
+                            holder.viewTransform = configureTransform(isMirrored, isNoCrop, textureView, textureView.width, textureView.height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
                         }
-
-                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+                        holder.updateFlash(flashMode)
+                        holder.onRawUnavailable = onRawUnavailable
+                        holder.updateRawCaptureEnabled(captureRaw)
                     }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
 
-                    if (isAvailable && width > 0 && height > 0) {
-                        val surface = surfaceTexture
-                        if (surface != null) {
-                            openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this, surface, width, height, holder, deviceRotationDegrees)
+            // Transparent tap layer for tap-to-focus. Controls are drawn above it,
+            // so taps on the UI never reach this layer.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(holder) {
+                        detectTapGestures { offset ->
+                            captureController.isFocusLockedState.value = false
+                            if (holder.tapToFocus(offset.x, offset.y)) {
+                                focusPoint = offset
+                                focusTick++
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            }
                         }
                     }
-                }
-            },
-            update = { textureView ->
-                if (textureView.width > 0 && textureView.height > 0) {
-                    holder.previewSize?.let { previewSize ->
-                        configureTransform(isMirrored, isNoCrop, textureView, textureView.width, textureView.height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
-                    }
-                    holder.updateFlash(flashMode)
-                    holder.onRawUnavailable = onRawUnavailable
-                    holder.updateRawCaptureEnabled(captureRaw)
-                }
-            },
-            modifier = modifier
-        )
+            )
+
+            val point = focusPoint
+            if (point != null) {
+                FocusRingOverlay(
+                    point = point,
+                    isLocked = captureController.isFocusLockedState,
+                    scale = ringScale,
+                    alpha = ringAlpha,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
 
         DisposableEffect(cameraId, isNoCrop) {
             onDispose {
                 holder.close()
             }
         }
+    }
+}
+
+@Composable
+private fun FocusRingOverlay(
+    point: Offset,
+    isLocked: State<Boolean>,
+    scale: Animatable<Float, AnimationVector1D>,
+    alpha: Animatable<Float, AnimationVector1D>,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val alphaValue = alpha.value
+        if (alphaValue <= 0.01f) return@Canvas
+
+        val ringColor = if (isLocked.value) Color(0xFFFFD700) else Color.White
+        val radius = 34.dp.toPx() * scale.value
+        val corner = CornerRadius(12.dp.toPx(), 12.dp.toPx())
+        val topLeft = Offset(point.x - radius, point.y - radius)
+        val ringSize = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f)
+
+        drawRoundRect(
+            color = Color.Black.copy(alpha = alphaValue * 0.35f),
+            topLeft = topLeft,
+            size = ringSize,
+            cornerRadius = corner,
+            style = Stroke(width = 5.dp.toPx())
+        )
+        drawRoundRect(
+            color = ringColor.copy(alpha = alphaValue),
+            topLeft = topLeft,
+            size = ringSize,
+            cornerRadius = corner,
+            style = Stroke(width = 2.dp.toPx())
+        )
+        drawCircle(
+            color = ringColor.copy(alpha = alphaValue * 0.9f),
+            radius = 2.dp.toPx(),
+            center = point
+        )
     }
 }
 
@@ -2206,10 +2561,12 @@ private fun openCameraSession(
     holder.cameraId = cameraId
     holder.flashMode = flashMode
     holder.textureView = textureView
+    holder.surfaceTexture = surfaceTexture
 
     try {
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         holder.characteristics = characteristics
+        holder.configureFocusCapabilities(characteristics)
 
         val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
         holder.hasFlash = hasFlash
@@ -2223,7 +2580,7 @@ private fun openCameraSession(
         holder.previewSize = previewSize
         surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
-        configureTransform(isMirrored, isNoCrop, textureView, width, height, previewSize, sensorOrientation, deviceRotationDegrees)
+        holder.viewTransform = configureTransform(isMirrored, isNoCrop, textureView, width, height, previewSize, sensorOrientation, deviceRotationDegrees)
 
         val previewSurface = Surface(surfaceTexture)
         holder.previewSurface = previewSurface
@@ -2276,6 +2633,7 @@ private fun openCameraSession(
 
                         val currentFlashMode = holder.flashMode
                         applyFlashMode(requestBuilder, currentFlashMode, hasFlash, isStillCapture = false, isDarkScene = holder.isDarkScene)
+                        holder.applyFocusMetering(requestBuilder)
                         holder.previewRequestBuilder = requestBuilder
 
                         val outputConfigs = mutableListOf(OutputConfiguration(previewSurface))
@@ -2299,16 +2657,7 @@ private fun openCameraSession(
                                     try {
                                         session.setRepeatingRequest(
                                             requestBuilder.build(),
-                                            object : CameraCaptureSession.CaptureCallback() {
-                                                override fun onCaptureCompleted(
-                                                    session: CameraCaptureSession,
-                                                    request: CaptureRequest,
-                                                    result: TotalCaptureResult
-                                                ) {
-                                                    super.onCaptureCompleted(session, request, result)
-                                                    holder.updateAEState(result)
-                                                }
-                                            },
+                                            holder.createRepeatingCallback(forRecording = false),
                                             bgHandler
                                         )
                                         holder.session = session
@@ -2367,8 +2716,10 @@ private fun configureTransform(
     previewSize: Size,
     sensorOrientation: Int = 90,
     deviceRotationDegrees: Int = 0
-) {
-    if (viewWidth <= 0 || viewHeight <= 0 || previewSize.width <= 0 || previewSize.height <= 0) return
+): Matrix {
+    if (viewWidth <= 0 || viewHeight <= 0 || previewSize.width <= 0 || previewSize.height <= 0) {
+        return Matrix()
+    }
 
     val isPortrait = viewHeight > viewWidth
 
@@ -2430,6 +2781,7 @@ private fun configureTransform(
     }
 
     textureView.setTransform(matrix)
+    return matrix
 }
 
 private fun chooseOptimalPreviewSize(

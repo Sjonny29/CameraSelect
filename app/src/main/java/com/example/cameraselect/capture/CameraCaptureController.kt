@@ -8,8 +8,10 @@ class CameraCaptureController {
     var startRecordingAction: ((rotationDegrees: Int, onStarted: () -> Unit, onError: (String) -> Unit) -> Unit)? = null
     var stopRecordingAction: ((onFinished: (Uri?) -> Unit) -> Unit)? = null
     var isDarkSceneAction: (() -> Boolean)? = null
+    var tapToFocusAction: ((x: Float, y: Float) -> Boolean)? = null
 
     val isDarkSceneState = mutableStateOf(false)
+    val isFocusLockedState = mutableStateOf(false)
 
     fun takePhoto(rotationDegrees: Int, saveRaw: Boolean, onCaptured: (Uri?, Uri?) -> Unit): Boolean =
         takePhotoAction?.invoke(rotationDegrees, saveRaw, onCaptured) ?: false
@@ -24,4 +26,7 @@ class CameraCaptureController {
 
     fun isDarkScene(): Boolean =
         isDarkSceneAction?.invoke() ?: isDarkSceneState.value
+
+    fun tapToFocus(x: Float, y: Float): Boolean =
+        tapToFocusAction?.invoke(x, y) ?: false
 }
