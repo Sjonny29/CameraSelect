@@ -1183,8 +1183,6 @@ private const val LUMINANCE_SAMPLE_INTERVAL_MS = 300L
 // before the flash had been metered (or before the LED was ready).
 private const val PRECAPTURE_START_TIMEOUT_MS = 2_000L
 private const val PRECAPTURE_DONE_TIMEOUT_MS = 3_000L
-private const val PRECAPTURE_HARD_TIMEOUT_MS =
-    PRECAPTURE_START_TIMEOUT_MS + PRECAPTURE_DONE_TIMEOUT_MS
 private const val FLASH_SETTLE_DELAY_MS = 100L
 private const val FLASH_DECISION_RESUME_DELAY_MS = 500L
 private const val AE_STATE_MAX_AGE_MS = 1_500L
@@ -2032,14 +2030,15 @@ private class CameraSessionHolder {
                     var sawPrecapture = false
                     var completedFrames = 0
                     var startTimedOut = false
+                    var waitingDone = false
                     var startTimeoutToken: Runnable? = null
-                    var hardTimeoutToken: Runnable? = null
+                    var doneTimeoutToken: Runnable? = null
 
                     val finishPrecapture: (String) -> Unit = { why ->
                         if (!finished) {
                             finished = true
                             startTimeoutToken?.let { backgroundHandler?.removeCallbacks(it) }
-                            hardTimeoutToken?.let { backgroundHandler?.removeCallbacks(it) }
+                            doneTimeoutToken?.let { backgroundHandler?.removeCallbacks(it) }
                             Log.d(
                                 "CameraFlash",
                                 "precapture finished ($why) after " +
@@ -2065,6 +2064,33 @@ private class CameraSessionHolder {
                         }
                     }
 
+                    // Mirrors OpenCamera: wait for CONTROL_AE_STATE_PRECAPTURE
+                    // first, then wait for the HAL to leave that state. A
+                    // FLASH_REQUIRED/CONVERGED result before the preflash has
+                    // even started is not enough, and capturing while the
+                    // preflash is still being metered is what produced dim
+                    // flash photos on some HALs.
+                    val enterWaitingDone: (String) -> Unit = { why ->
+                        if (!waitingDone) {
+                            waitingDone = true
+                            Log.d(
+                                "CameraFlash",
+                                "precapture waiting-done ($why) after " +
+                                    "${SystemClock.elapsedRealtime() - precaptureStartedAt}ms"
+                            )
+                            val doneTimeout = Runnable {
+                                Log.w(
+                                    "CameraFlash",
+                                    "precapture done timeout after " +
+                                        "${SystemClock.elapsedRealtime() - precaptureStartedAt}ms"
+                                )
+                                finishPrecapture("done-timeout")
+                            }
+                            doneTimeoutToken = doneTimeout
+                            backgroundHandler?.postDelayed(doneTimeout, PRECAPTURE_DONE_TIMEOUT_MS)
+                        }
+                    }
+
                     val startTimeout = Runnable {
                         startTimedOut = true
                         Log.w(
@@ -2072,21 +2098,8 @@ private class CameraSessionHolder {
                             "precapture start timeout after " +
                                 "${SystemClock.elapsedRealtime() - precaptureStartedAt}ms"
                         )
+                        enterWaitingDone("start-timeout")
                     }
-                    startTimeoutToken = startTimeout
-                    backgroundHandler?.postDelayed(startTimeout, PRECAPTURE_START_TIMEOUT_MS)
-
-                    val hardTimeout = Runnable {
-                        Log.w(
-                            "CameraFlash",
-                            "precapture hard timeout after " +
-                                "${SystemClock.elapsedRealtime() - precaptureStartedAt}ms"
-                        )
-                        finishPrecapture("hard-timeout")
-                    }
-                    hardTimeoutToken = hardTimeout
-                    backgroundHandler?.postDelayed(hardTimeout, PRECAPTURE_HARD_TIMEOUT_MS)
-
                     sess.capture(precaptureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
                             session: CameraCaptureSession,
@@ -2099,26 +2112,16 @@ private class CameraSessionHolder {
                             if (aeState == CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
                                 sawPrecapture = true
                             }
-                            val elapsed = SystemClock.elapsedRealtime() - precaptureStartedAt
-                            // Wait for the preflash/metering sequence to settle
-                            // before taking the still. Capturing on the first
-                            // frame can abort the sequence and skip the flash.
-                            val settled = when {
-                                completedFrames < 2 -> false
-                                aeState == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED ||
-                                    aeState == CaptureResult.CONTROL_AE_STATE_LOCKED -> true
-                                sawPrecapture &&
-                                    aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE &&
-                                    aeState != CaptureResult.CONTROL_AE_STATE_SEARCHING -> true
-                                aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED &&
-                                    elapsed >= 250L -> true
-                                (startTimedOut || elapsed >= PRECAPTURE_START_TIMEOUT_MS) &&
-                                    completedFrames >= 2 &&
-                                    aeState != CaptureResult.CONTROL_AE_STATE_SEARCHING &&
-                                    aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE -> true
-                                else -> false
+                            if (!waitingDone) {
+                                if (aeState == CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
+                                    enterWaitingDone("precapture")
+                                } else if (startTimedOut) {
+                                    enterWaitingDone("start-timeout")
+                                }
                             }
-                            if (settled) {
+                            if (waitingDone &&
+                                aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE
+                            ) {
                                 finishPrecapture("ae-settled ae=$aeState")
                             }
                         }
@@ -2132,6 +2135,13 @@ private class CameraSessionHolder {
                             finishPrecapture("capture-failed")
                         }
                     }, backgroundHandler)
+
+                    // Schedule after the capture call so a synchronous failure
+                    // does not leave a timeout that could fire a second still.
+                    if (!finished) {
+                        startTimeoutToken = startTimeout
+                        backgroundHandler?.postDelayed(startTimeout, PRECAPTURE_START_TIMEOUT_MS)
+                    }
                 } catch (e: Exception) {
                     Log.e("Camera2Preview", "Error starting AE precapture trigger, proceeding with direct capture", e)
                     doStillCapture()
