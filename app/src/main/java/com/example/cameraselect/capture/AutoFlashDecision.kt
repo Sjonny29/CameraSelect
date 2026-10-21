@@ -1,12 +1,48 @@
 package com.example.cameraselect.capture
 
 /**
+ * The part of the HAL's AE state that matters for flash decisions.
+ */
+enum class AeFlashState {
+    /** The HAL says the scene needs a flash. */
+    REQUIRED,
+
+    /** The HAL has converged without asking for a flash. */
+    CONVERGED,
+
+    /** Searching, locked, precapturing, or the result did not contain a state. */
+    UNKNOWN
+}
+
+/** Why the detector reached its current verdict. Used for logging. */
+enum class FlashDecisionReason {
+    NONE,
+    HAL_REQUIRED,
+    SENSOR_DARK,
+    VERY_DARK,
+    HAL_CONVERGED_VETO,
+    LUMA_VETO
+}
+
+/**
  * Decides whether the scene is dark enough for AUTO flash/torch.
  *
- * A scene only counts as dark when the sensor exposure and the preview image
- * agree with each other. The verdict also has to be stable for a short dwell
- * time before it is applied, so a single noisy AE frame or a pushy
- * FLASH_REQUIRED report can no longer fire the flash in a bright scene.
+ * The HAL is the primary source of truth for a rear still photo: a steady
+ * FLASH_REQUIRED confirms a dim scene, and a steady CONVERGED vetoes the flash.
+ * The sensor exposure (or, when it is missing, the preview luminance) still has
+ * to agree, so a single noisy AE frame or a pushy FLASH_REQUIRED report cannot
+ * fire the flash in a bright scene. A very dark sensor reading can override
+ * both signals, which covers devices whose HAL never reports FLASH_REQUIRED.
+ *
+ * Cameras without an LED (typically the front camera) ignore the HAL state
+ * entirely: they only use the sensor exposure plus preview luminance, so a
+ * stray FLASH_REQUIRED cannot turn the simulated screen flash on in a lit room.
+ *
+ * The same detector also drives the video auto-torch. Video runs with plain AE
+ * (no flash), so CONVERGED there says nothing about whether a still would need
+ * a flash. [update] therefore takes a [useHalVeto] flag: the video path keeps
+ * the original sensor/luma behavior, while still capture gets the hybrid HAL
+ * confirm/veto logic.
  *
  * The class is deliberately free of Android types so the thresholds can be
  * unit tested.
@@ -17,12 +53,18 @@ class AutoFlashDecision(
     private val sensorVeryDark: Double = 60.0,
     private val lumaDarkEnter: Float = 50f,
     private val lumaDarkExit: Float = 65f,
+    private val lumaBrightVeto: Float = 90f,
     private val enterDwellMs: Long = 350L,
     private val exitDwellMs: Long = 1_200L,
     private val previewWarmUpMs: Long = 800L,
     private val lumaMaxAgeMs: Long = 1_500L,
+    private val halDebounceMs: Long = 150L,
 ) {
     var isDark: Boolean = false
+        private set
+
+    /** Reason for the current (or, while bright, the latest) verdict. */
+    var reason: FlashDecisionReason = FlashDecisionReason.NONE
         private set
 
     private var previewStartedAtMs = Long.MIN_VALUE
@@ -30,15 +72,24 @@ class AutoFlashDecision(
     private var brightSinceMs = Long.MIN_VALUE
     private var lastLuma: Float? = null
     private var lastLumaAtMs = Long.MIN_VALUE
+    private var halCandidate = AeFlashState.UNKNOWN
+    private var halCandidateSinceMs = Long.MIN_VALUE
+    private var stableHalState = AeFlashState.UNKNOWN
+    private var suspendedUntilMs = Long.MIN_VALUE
 
     /** Restarts the decision, e.g. when a new preview session is configured. */
     fun onPreviewStarted(nowMs: Long) {
         isDark = false
+        reason = FlashDecisionReason.NONE
         previewStartedAtMs = nowMs
         darkCandidateSinceMs = Long.MIN_VALUE
         brightSinceMs = nowMs
         lastLuma = null
         lastLumaAtMs = Long.MIN_VALUE
+        halCandidate = AeFlashState.UNKNOWN
+        halCandidateSinceMs = nowMs
+        stableHalState = AeFlashState.UNKNOWN
+        suspendedUntilMs = Long.MIN_VALUE
     }
 
     /**
@@ -51,6 +102,17 @@ class AutoFlashDecision(
         if (nowMs - previewStartedAtMs < previewWarmUpMs) return
         lastLuma = averageLuma
         lastLumaAtMs = nowMs
+    }
+
+    /**
+     * Ignores AE/luminance frames until [nowMs]. Used while the precapture and
+     * flash sequence is running, because the preflash makes the scene look
+     * brighter than it really is.
+     */
+    fun suspendUntil(nowMs: Long) {
+        if (nowMs > suspendedUntilMs) {
+            suspendedUntilMs = nowMs
+        }
     }
 
     /**
@@ -67,57 +129,141 @@ class AutoFlashDecision(
         nowMs: Long,
         iso: Int?,
         exposureTimeNs: Long?,
-        flashRequired: Boolean,
+        aeFlashState: AeFlashState,
         hasHardwareFlash: Boolean = true,
+        useHalVeto: Boolean = true,
     ): Boolean {
         if (previewStartedAtMs == Long.MIN_VALUE) return isDark
         if (nowMs - previewStartedAtMs < previewWarmUpMs) return isDark
+        if (nowMs < suspendedUntilMs) return isDark
+
+        updateStableHalState(nowMs, aeFlashState)
 
         val sensorScore = sensorScore(iso, exposureTimeNs)
+        val hasSensorData = sensorScore != null
         val sensorThreshold = if (isDark) sensorDarkExit else sensorDarkEnter
+        val sensorDark = sensorScore != null && sensorScore > sensorThreshold
 
         val luma = lastLuma?.takeIf { nowMs - lastLumaAtMs <= lumaMaxAgeMs }
         val lumaThreshold = if (isDark) lumaDarkExit else lumaDarkEnter
         val lumaDark = luma != null && luma < lumaThreshold
+        val lumaBright = luma != null && luma > lumaBrightVeto
 
-        // FLASH_REQUIRED and the extreme-exposure override only make sense for
-        // cameras that can actually fire a flash.
-        val flashAgrees = hasHardwareFlash && flashRequired
+        // The extreme-exposure override only makes sense for a camera that can
+        // actually fire an LED.
+        val veryDark = hasHardwareFlash && sensorScore != null && sensorScore > sensorVeryDark
 
-        // Most devices report SENSOR_SENSITIVITY/SENSOR_EXPOSURE_TIME. When a
-        // lens does not, fall back to the HAL's flash request plus a dark
-        // preview instead of never enabling the flash.
-        val sensorDark = if (sensorScore != null) {
-            sensorScore > sensorThreshold
+        val darkCandidate: Boolean
+        val candidateReason: FlashDecisionReason
+        if (!hasHardwareFlash) {
+            // No LED: ignore the HAL entirely. Both the sensor and the preview
+            // have to agree that the scene is dark.
+            darkCandidate = sensorDark && lumaDark
+            candidateReason = if (darkCandidate) {
+                FlashDecisionReason.SENSOR_DARK
+            } else {
+                FlashDecisionReason.NONE
+            }
+        } else if (!useHalVeto) {
+            // Video auto-torch path. The video request uses plain AE, so a
+            // CONVERGED state must not veto the torch. Keep the original
+            // sensor/luma behavior; a FLASH_REQUIRED report can still confirm
+            // the scene, and a very dark sensor can force it.
+            darkCandidate = sensorDark &&
+                (lumaDark || stableHalState == AeFlashState.REQUIRED || veryDark)
+            candidateReason = when {
+                !darkCandidate -> FlashDecisionReason.NONE
+                veryDark -> FlashDecisionReason.VERY_DARK
+                stableHalState == AeFlashState.REQUIRED -> FlashDecisionReason.HAL_REQUIRED
+                else -> FlashDecisionReason.SENSOR_DARK
+            }
         } else {
-            flashAgrees && lumaDark
+            when {
+                // A very dark sensor is trusted even when the preview pipeline
+                // brightens the displayed image or the HAL stays quiet.
+                veryDark -> {
+                    darkCandidate = true
+                    candidateReason = FlashDecisionReason.VERY_DARK
+                }
+
+                // The HAL vetoes the flash in a scene it has already exposed.
+                stableHalState == AeFlashState.CONVERGED -> {
+                    darkCandidate = false
+                    candidateReason = FlashDecisionReason.HAL_CONVERGED_VETO
+                }
+
+                // The HAL confirms the flash, but the sensor still has to
+                // agree (or the preview must be dark when the sensor has no
+                // exposure data). This keeps a faulty FLASH_REQUIRED report
+                // from firing the LED in a bright scene.
+                stableHalState == AeFlashState.REQUIRED -> {
+                    val sensorAgrees = if (hasSensorData) sensorDark else lumaDark
+                    darkCandidate = sensorAgrees
+                    candidateReason = if (sensorAgrees) {
+                        FlashDecisionReason.HAL_REQUIRED
+                    } else {
+                        FlashDecisionReason.NONE
+                    }
+                }
+
+                // A bright preview is a final safety net when the HAL is
+                // silent but the sensor looks dim.
+                lumaBright -> {
+                    darkCandidate = false
+                    candidateReason = FlashDecisionReason.LUMA_VETO
+                }
+
+                sensorDark && lumaDark -> {
+                    darkCandidate = true
+                    candidateReason = FlashDecisionReason.SENSOR_DARK
+                }
+
+                else -> {
+                    darkCandidate = false
+                    candidateReason = FlashDecisionReason.NONE
+                }
+            }
         }
-
-        // Very long exposure / very high ISO means the scene is dark even if
-        // the preview pipeline brightens the displayed image or the HAL does
-        // not report FLASH_REQUIRED.
-        val veryDarkSensor = hasHardwareFlash &&
-            sensorScore != null &&
-            sensorScore > sensorVeryDark
-
-        // Require the sensor exposure to be dark and at least one independent
-        // signal to agree. FLASH_REQUIRED alone never enables the flash.
-        val darkCandidate = sensorDark && (lumaDark || flashAgrees || veryDarkSensor)
 
         if (darkCandidate) {
             brightSinceMs = Long.MIN_VALUE
             if (darkCandidateSinceMs == Long.MIN_VALUE) darkCandidateSinceMs = nowMs
             if (!isDark && nowMs - darkCandidateSinceMs >= enterDwellMs) {
                 isDark = true
+                reason = candidateReason
+            } else if (isDark) {
+                // Keep the reason fresh (e.g. HAL_REQUIRED -> VERY_DARK).
+                reason = candidateReason
             }
         } else {
             darkCandidateSinceMs = Long.MIN_VALUE
             if (brightSinceMs == Long.MIN_VALUE) brightSinceMs = nowMs
             if (isDark && nowMs - brightSinceMs >= exitDwellMs) {
                 isDark = false
+                reason = candidateReason
+            } else if (!isDark) {
+                reason = candidateReason
             }
         }
         return isDark
+    }
+
+    private fun updateStableHalState(nowMs: Long, aeFlashState: AeFlashState) {
+        if (aeFlashState == halCandidate) {
+            if (halCandidateSinceMs == Long.MIN_VALUE) halCandidateSinceMs = nowMs
+            if (nowMs - halCandidateSinceMs >= halDebounceMs) {
+                stableHalState = aeFlashState
+            }
+        } else {
+            halCandidate = aeFlashState
+            halCandidateSinceMs = nowMs
+            // Drop the previous veto/confirm while the HAL is changing. If the
+            // new state persists for halDebounceMs it becomes stable above;
+            // meanwhile the sensor/luma fallback keeps working. This avoids a
+            // stale CONVERGED veto sticking forever on a HAL that alternates
+            // between CONVERGED and FLASH_REQUIRED.
+            stableHalState = AeFlashState.UNKNOWN
+        }
     }
 
     private fun sensorScore(iso: Int?, exposureTimeNs: Long?): Double? {
