@@ -1180,10 +1180,15 @@ private const val LUMINANCE_SAMPLE_INTERVAL_MS = 300L
 
 // OpenCamera uses separate start/done budgets for the AE precapture sequence.
 // A single 1.2s budget was too short for many HALs, so the still could fire
-// before the flash had been metered (or before the LED was ready).
-private const val PRECAPTURE_START_TIMEOUT_MS = 2_000L
-private const val PRECAPTURE_DONE_TIMEOUT_MS = 3_000L
-private const val FLASH_SETTLE_DELAY_MS = 100L
+// before the flash had been metered (or before the LED was ready). These
+// budgets are kept just long enough to cover a slow HAL without letting the
+// gap between the preflash and the actual flash grow to multiple seconds.
+private const val PRECAPTURE_START_TIMEOUT_MS = 1_000L
+private const val PRECAPTURE_DONE_TIMEOUT_MS = 1_500L
+// OpenCamera captures as soon as precapture leaves AE_STATE_PRECAPTURE. This
+// short guard replaces the old 100ms delay, which added a visible lag before
+// every flash photo.
+private const val FLASH_SETTLE_DELAY_MS = 25L
 private const val FLASH_DECISION_RESUME_DELAY_MS = 500L
 private const val AE_STATE_MAX_AGE_MS = 1_500L
 
