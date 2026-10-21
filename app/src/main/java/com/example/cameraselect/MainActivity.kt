@@ -1162,15 +1162,24 @@ private fun applyFlashMode(
             }
             FlashMode.AUTO -> {
                 if (allowAutoFlash) {
-                    // Let AE meter with the preflash and fire the flash if it
-                    // still decides one is needed.
+                    // Dark scene: let AE meter with the preflash and fire the
+                    // main flash. Several HALs also require FLASH_MODE_SINGLE on
+                    // the still request before they actually fire.
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    builder.set(
+                        CaptureRequest.FLASH_MODE,
+                        if (isStillCapture) {
+                            CaptureRequest.FLASH_MODE_SINGLE
+                        } else {
+                            CaptureRequest.FLASH_MODE_OFF
+                        }
+                    )
                 } else {
                     // Plain AE without AUTO_FLASH: the HAL cannot fire the flash
                     // on its own when the scene was measured as bright.
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 }
-                builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
             }
             FlashMode.TORCH -> {
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
