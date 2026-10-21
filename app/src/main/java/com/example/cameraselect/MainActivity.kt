@@ -1161,22 +1161,27 @@ private fun applyFlashMode(
                 }
             }
             FlashMode.AUTO -> {
-                if (isStillCapture && !allowAutoFlash) {
+                if (isStillCapture && allowAutoFlash) {
+                    // Dark scene: behave exactly like Flash ON for this capture.
+                    // ALWAYS_FLASH makes AE meter for the main flash, so the
+                    // photo is exposed for it instead of for ambient light.
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                } else if (!isStillCapture && allowAutoFlash) {
+                    // Dark scene precapture: meter for the full flash just like
+                    // Flash ON. The trigger itself fires the preflash.
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                } else if (isStillCapture) {
                     // Bright scene: plain AE without AUTO_FLASH so the HAL cannot
                     // fire the flash on its own.
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                     builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                } else if (isStillCapture) {
-                    // Dark scene: let AE meter with the preflash and fire the
-                    // main flash. Several HALs also require FLASH_MODE_SINGLE on
-                    // the still request before they actually fire.
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
                 } else {
-                    // Preview / precapture: stay in the flash-capable AE mode so
-                    // the HAL keeps reporting AE_STATE_FLASH_REQUIRED and is
-                    // ready to run the preflash. A repeating preview request
-                    // never fires the flash by itself.
+                    // Preview: stay in the flash-capable AE mode so the HAL keeps
+                    // reporting AE_STATE_FLASH_REQUIRED for the dark-scene
+                    // detector. A repeating preview request never fires the
+                    // flash by itself.
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
                     builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 }
@@ -1325,7 +1330,8 @@ private class CameraSessionHolder {
             nowMs = now,
             iso = result.get(CaptureResult.SENSOR_SENSITIVITY),
             exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
-            flashRequired = flashRequired
+            flashRequired = flashRequired,
+            hasHardwareFlash = hasFlash
         )
         if (newDarkScene == isDarkScene) return
         isDarkScene = newDarkScene

@@ -55,12 +55,20 @@ class AutoFlashDecision(
 
     /**
      * Feeds one AE result. Returns the stabilised dark-scene verdict.
+     *
+     * [hasHardwareFlash] must be false for cameras without an LED (typically
+     * the front camera). Such cameras run with plain AE, but some HALs still
+     * report FLASH_REQUIRED; trusting it there would fire the simulated screen
+     * flash in a lit room. The same applies to the extreme-exposure override,
+     * which is meant to help a real flash fire in a dim room. Without an LED,
+     * only the sensor exposure and the preview luminance may agree.
      */
     fun update(
         nowMs: Long,
         iso: Int?,
         exposureTimeNs: Long?,
         flashRequired: Boolean,
+        hasHardwareFlash: Boolean = true,
     ): Boolean {
         if (previewStartedAtMs == Long.MIN_VALUE) return isDark
         if (nowMs - previewStartedAtMs < previewWarmUpMs) return isDark
@@ -72,23 +80,29 @@ class AutoFlashDecision(
         val lumaThreshold = if (isDark) lumaDarkExit else lumaDarkEnter
         val lumaDark = luma != null && luma < lumaThreshold
 
+        // FLASH_REQUIRED and the extreme-exposure override only make sense for
+        // cameras that can actually fire a flash.
+        val flashAgrees = hasHardwareFlash && flashRequired
+
         // Most devices report SENSOR_SENSITIVITY/SENSOR_EXPOSURE_TIME. When a
         // lens does not, fall back to the HAL's flash request plus a dark
         // preview instead of never enabling the flash.
         val sensorDark = if (sensorScore != null) {
             sensorScore > sensorThreshold
         } else {
-            flashRequired && lumaDark
+            flashAgrees && lumaDark
         }
 
         // Very long exposure / very high ISO means the scene is dark even if
         // the preview pipeline brightens the displayed image or the HAL does
         // not report FLASH_REQUIRED.
-        val veryDarkSensor = sensorScore != null && sensorScore > sensorVeryDark
+        val veryDarkSensor = hasHardwareFlash &&
+            sensorScore != null &&
+            sensorScore > sensorVeryDark
 
         // Require the sensor exposure to be dark and at least one independent
         // signal to agree. FLASH_REQUIRED alone never enables the flash.
-        val darkCandidate = sensorDark && (lumaDark || flashRequired || veryDarkSensor)
+        val darkCandidate = sensorDark && (lumaDark || flashAgrees || veryDarkSensor)
 
         if (darkCandidate) {
             brightSinceMs = Long.MIN_VALUE

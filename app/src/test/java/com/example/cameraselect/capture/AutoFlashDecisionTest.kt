@@ -190,4 +190,55 @@ class AutoFlashDecisionTest {
 
         assertTrue(result)
     }
+
+    @Test
+    fun noHardwareFlash_ignoresFlashRequiredInLitRoom() {
+        val decision = AutoFlashDecision()
+        decision.onPreviewStarted(0)
+
+        // Score ~53: passes the sensor threshold, but the preview is bright.
+        // A front camera without an LED must not trust FLASH_REQUIRED here.
+        val dimIso = 1600
+        val dimExposureNs = 33_333_333L
+        var result = false
+        for (t in 900L..3000L step 50L) {
+            decision.onPreviewLuma(t, 90f)
+            result = decision.update(
+                t,
+                dimIso,
+                dimExposureNs,
+                flashRequired = true,
+                hasHardwareFlash = false
+            )
+        }
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun noHardwareFlash_ignoresVeryDarkSensorOverride() {
+        val decision = AutoFlashDecision()
+        decision.onPreviewStarted(0)
+
+        // The extreme-exposure override exists to help a real LED fire. On a
+        // camera without one it must not drive the simulated screen flash.
+        var result = false
+        for (t in 900L..1500L step 50L) {
+            decision.onPreviewLuma(t, 120f)
+            result = decision.update(t, 6400, darkExposureNs, flashRequired = false, hasHardwareFlash = false)
+        }
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun noHardwareFlash_turnsDarkFromDarkPreview() {
+        val decision = AutoFlashDecision()
+        decision.onPreviewStarted(0)
+
+        decision.onPreviewLuma(900, 15f)
+        assertFalse(decision.update(900, darkIso, darkExposureNs, flashRequired = false, hasHardwareFlash = false))
+        assertFalse(decision.update(1200, darkIso, darkExposureNs, flashRequired = false, hasHardwareFlash = false))
+        assertTrue(decision.update(1260, darkIso, darkExposureNs, flashRequired = false, hasHardwareFlash = false))
+    }
 }
