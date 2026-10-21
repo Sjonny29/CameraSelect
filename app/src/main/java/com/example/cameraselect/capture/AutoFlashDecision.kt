@@ -14,6 +14,7 @@ package com.example.cameraselect.capture
 class AutoFlashDecision(
     private val sensorDarkEnter: Double = 25.0,
     private val sensorDarkExit: Double = 15.0,
+    private val sensorVeryDark: Double = 60.0,
     private val lumaDarkEnter: Float = 50f,
     private val lumaDarkExit: Float = 65f,
     private val enterDwellMs: Long = 350L,
@@ -66,15 +67,28 @@ class AutoFlashDecision(
 
         val sensorScore = sensorScore(iso, exposureTimeNs)
         val sensorThreshold = if (isDark) sensorDarkExit else sensorDarkEnter
-        val sensorDark = sensorScore != null && sensorScore > sensorThreshold
 
         val luma = lastLuma?.takeIf { nowMs - lastLumaAtMs <= lumaMaxAgeMs }
         val lumaThreshold = if (isDark) lumaDarkExit else lumaDarkEnter
         val lumaDark = luma != null && luma < lumaThreshold
 
+        // Most devices report SENSOR_SENSITIVITY/SENSOR_EXPOSURE_TIME. When a
+        // lens does not, fall back to the HAL's flash request plus a dark
+        // preview instead of never enabling the flash.
+        val sensorDark = if (sensorScore != null) {
+            sensorScore > sensorThreshold
+        } else {
+            flashRequired && lumaDark
+        }
+
+        // Very long exposure / very high ISO means the scene is dark even if
+        // the preview pipeline brightens the displayed image or the HAL does
+        // not report FLASH_REQUIRED.
+        val veryDarkSensor = sensorScore != null && sensorScore > sensorVeryDark
+
         // Require the sensor exposure to be dark and at least one independent
         // signal to agree. FLASH_REQUIRED alone never enables the flash.
-        val darkCandidate = sensorDark && (lumaDark || flashRequired)
+        val darkCandidate = sensorDark && (lumaDark || flashRequired || veryDarkSensor)
 
         if (darkCandidate) {
             brightSinceMs = Long.MIN_VALUE

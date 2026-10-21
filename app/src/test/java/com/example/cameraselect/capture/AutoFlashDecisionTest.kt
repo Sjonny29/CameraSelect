@@ -106,14 +106,18 @@ class AutoFlashDecisionTest {
         val decision = AutoFlashDecision()
         decision.onPreviewStarted(0)
 
-        var result = decision.update(900, darkIso, darkExposureNs, flashRequired = false)
+        // Score ~33: dark enough for the enter threshold but not so dark that
+        // the sensor alone is trusted.
+        val borderlineIso = 1000
+        val borderlineExposureNs = 33_333_333L
+        var result = decision.update(900, borderlineIso, borderlineExposureNs, flashRequired = false)
         for (t in 950L..3000L step 50L) {
-            result = decision.update(t, darkIso, darkExposureNs, flashRequired = false)
+            result = decision.update(t, borderlineIso, borderlineExposureNs, flashRequired = false)
         }
         assertFalse(result)
 
-        assertFalse(decision.update(3050, darkIso, darkExposureNs, flashRequired = true))
-        assertTrue(decision.update(3450, darkIso, darkExposureNs, flashRequired = true))
+        assertFalse(decision.update(3050, borderlineIso, borderlineExposureNs, flashRequired = true))
+        assertTrue(decision.update(3450, borderlineIso, borderlineExposureNs, flashRequired = true))
     }
 
     @Test
@@ -144,5 +148,46 @@ class AutoFlashDecisionTest {
         }
 
         assertFalse(result)
+    }
+
+    @Test
+    fun missingSensorData_fallsBackToFlashRequiredAndLuma() {
+        val decision = AutoFlashDecision()
+        decision.onPreviewStarted(0)
+
+        // FLASH_REQUIRED without luminance data is not enough.
+        assertFalse(decision.update(900, null, null, flashRequired = true))
+
+        decision.onPreviewLuma(900, 20f)
+        assertFalse(decision.update(1000, null, null, flashRequired = true))
+        assertTrue(decision.update(1400, null, null, flashRequired = true))
+    }
+
+    @Test
+    fun missingSensorDataWithBrightPreview_staysBright() {
+        val decision = AutoFlashDecision()
+        decision.onPreviewStarted(0)
+
+        var result = false
+        for (t in 900L..3000L step 50L) {
+            decision.onPreviewLuma(t, 120f)
+            result = decision.update(t, null, null, flashRequired = true)
+        }
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun veryDarkSensor_turnsDarkEvenWithBrightPreview() {
+        val decision = AutoFlashDecision()
+        decision.onPreviewStarted(0)
+
+        var result = false
+        for (t in 900L..1400L step 50L) {
+            decision.onPreviewLuma(t, 120f)
+            result = decision.update(t, 6400, darkExposureNs, flashRequired = false)
+        }
+
+        assertTrue(result)
     }
 }
