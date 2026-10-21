@@ -44,16 +44,22 @@ enum class FlashDecisionReason {
  * the original sensor/luma behavior, while still capture gets the hybrid HAL
  * confirm/veto logic.
  *
+ * The default thresholds are deliberately conservative so AUTO only engages in
+ * a genuinely dark scene: the sensor has to read above ~80 ISO-seconds (roughly
+ * ISO 2400 at 1/30 s) and the preview below 18/255 to enter the dark state, and
+ * above ~120 ISO-seconds to override the HAL. Raise the sensor values and lower
+ * the luma values to make the flash stricter.
+ *
  * The class is deliberately free of Android types so the thresholds can be
  * unit tested.
  */
 class AutoFlashDecision(
-    private val sensorDarkEnter: Double = 25.0,
-    private val sensorDarkExit: Double = 15.0,
-    private val sensorVeryDark: Double = 60.0,
-    private val lumaDarkEnter: Float = 50f,
-    private val lumaDarkExit: Float = 65f,
-    private val lumaBrightVeto: Float = 90f,
+    private val sensorDarkEnter: Double = 80.0,
+    private val sensorDarkExit: Double = 50.0,
+    private val sensorVeryDark: Double = 120.0,
+    private val lumaDarkEnter: Float = 18f,
+    private val lumaDarkExit: Float = 28f,
+    private val lumaBrightVeto: Float = 50f,
     private val enterDwellMs: Long = 350L,
     private val exitDwellMs: Long = 1_200L,
     private val previewWarmUpMs: Long = 800L,

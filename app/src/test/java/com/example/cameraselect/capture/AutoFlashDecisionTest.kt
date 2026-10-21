@@ -76,13 +76,13 @@ class AutoFlashDecisionTest {
         assertFalse(decision.dark(900))
         assertTrue(decision.dark(1400))
 
-        // Score ~16.7 (between the exit and enter thresholds) and luma 58
-        // (between the exit and enter thresholds) must not drop out of dark.
-        val borderlineIso = 1000
-        val borderlineExposureNs = 16_666_666L
+        // Score ~66.6 (between the exit 50 and enter 80 thresholds) and luma 22
+        // (between the enter 18 and exit 28 thresholds) must not drop out of dark.
+        val borderlineIso = 2000
+        val borderlineExposureNs = 33_333_333L
         var result = true
         for (t in 1450L..2500L step 50L) {
-            decision.onPreviewLuma(t, 58f)
+            decision.onPreviewLuma(t, 22f)
             result = decision.update(t, borderlineIso, borderlineExposureNs, AeFlashState.REQUIRED)
         }
         assertTrue(result)
@@ -111,10 +111,10 @@ class AutoFlashDecisionTest {
         val decision = AutoFlashDecision()
         decision.onPreviewStarted(0)
 
-        // Score ~33: dark enough for the enter threshold but not so dark that
-        // the sensor alone is trusted. Without luma or a flash request the
-        // scene must stay bright.
-        val borderlineIso = 1000
+        // Score ~90: dark enough for the enter threshold (80) but not so dark
+        // that the sensor alone is trusted (120). Without luma or a flash
+        // request the scene must stay bright.
+        val borderlineIso = 2700
         val borderlineExposureNs = 33_333_333L
         var result = decision.update(900, borderlineIso, borderlineExposureNs, AeFlashState.CONVERGED)
         for (t in 950L..3000L step 50L) {
@@ -178,7 +178,7 @@ class AutoFlashDecisionTest {
         // FLASH_REQUIRED without luminance data is not enough.
         assertFalse(decision.update(900, null, null, AeFlashState.REQUIRED))
 
-        decision.onPreviewLuma(900, 20f)
+        decision.onPreviewLuma(900, 15f)
         assertFalse(decision.update(1200, null, null, AeFlashState.REQUIRED))
         assertTrue(decision.update(1550, null, null, AeFlashState.REQUIRED))
     }
@@ -216,9 +216,9 @@ class AutoFlashDecisionTest {
         val decision = AutoFlashDecision()
         decision.onPreviewStarted(0)
 
-        // Score ~53: passes the sensor threshold, but the preview is bright.
+        // Score ~90: passes the 80 sensor threshold, but the preview is bright.
         // A front camera without an LED must not trust FLASH_REQUIRED here.
-        val dimIso = 1600
+        val dimIso = 2700
         val dimExposureNs = 33_333_333L
         var result = false
         for (t in 900L..3000L step 50L) {
@@ -298,9 +298,10 @@ class AutoFlashDecisionTest {
         val decision = AutoFlashDecision()
         decision.onPreviewStarted(0)
 
-        // The sensor is dim and the HAL asks for a flash. A bright preview
+        // The sensor is dim (score ~90, above the 80 enter threshold but below
+        // the 120 override) and the HAL asks for a flash. A bright preview
         // (e.g. a night-mode preview) must not veto that combination.
-        val dimIso = 1000
+        val dimIso = 2700
         val dimExposureNs = 33_333_333L
         decision.onPreviewLuma(900, 120f)
         assertFalse(decision.update(900, dimIso, dimExposureNs, AeFlashState.REQUIRED))
