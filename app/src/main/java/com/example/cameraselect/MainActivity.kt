@@ -125,6 +125,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.cameraselect.capture.AutoFlashDecision
 import com.example.cameraselect.capture.CameraCaptureController
 import com.example.cameraselect.capture.CameraCaptureManager
 import com.example.cameraselect.model.CameraLensInfo
@@ -663,8 +664,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             if (captureMode == CaptureMode.PHOTO && selectedLensSupportsRaw) {
                 PhotoFormatSelector(
                     currentFormat = photoFormat,
-                    onFormatSelected = { viewModel.setPhotoFormat(it) },
-                    modifier = Modifier.rotate(buttonRotation)
+                    onFormatSelected = { viewModel.setPhotoFormat(it) }
                 )
             }
 
@@ -1144,7 +1144,7 @@ private fun applyFlashMode(
     flashMode: FlashMode,
     hasFlash: Boolean,
     isStillCapture: Boolean = false,
-    isDarkScene: Boolean = false
+    allowAutoFlash: Boolean = false
 ) {
     if (hasFlash) {
         when (flashMode) {
@@ -1161,14 +1161,28 @@ private fun applyFlashMode(
                 }
             }
             FlashMode.AUTO -> {
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
-                if (isStillCapture) {
-                    if (isDarkScene) {
-                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
-                    } else {
-                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                    }
+                if (isStillCapture && allowAutoFlash) {
+                    // Dark scene: behave exactly like Flash ON for this capture.
+                    // ALWAYS_FLASH makes AE meter for the main flash, so the
+                    // photo is exposed for it instead of for ambient light.
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                } else if (!isStillCapture && allowAutoFlash) {
+                    // Dark scene precapture: meter for the full flash just like
+                    // Flash ON. The trigger itself fires the preflash.
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                } else if (isStillCapture) {
+                    // Bright scene: plain AE without AUTO_FLASH so the HAL cannot
+                    // fire the flash on its own.
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 } else {
+                    // Preview: stay in the flash-capable AE mode so the HAL keeps
+                    // reporting AE_STATE_FLASH_REQUIRED for the dark-scene
+                    // detector. A repeating preview request never fires the
+                    // flash by itself.
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
                     builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 }
             }
@@ -1183,17 +1197,24 @@ private fun applyFlashMode(
     }
 }
 
+private const val LUMINANCE_SAMPLE_SIZE = 16
+private const val LUMINANCE_SAMPLE_INTERVAL_MS = 300L
+private const val PRECAPTURE_TIMEOUT_MS = 1_200L
+
 private class CameraSessionHolder {
     var device: CameraDevice? = null
     var session: CameraCaptureSession? = null
     var previewRequestBuilder: CaptureRequest.Builder? = null
     var hasFlash: Boolean = false
     var flashMode: FlashMode = FlashMode.OFF
-    var isDarkScene: Boolean = false
+    @Volatile var isDarkScene: Boolean = false
+        private set
     var onDarkSceneChanged: ((Boolean) -> Unit)? = null
     var isTorchOnDuringRecording: Boolean = false
+    private val autoFlashDecision = AutoFlashDecision()
     private var lastLuminanceCheckTime: Long = 0L
-    private var isLowLightLuminance: Boolean = false
+    private var luminanceBitmap: Bitmap? = null
+    private val luminancePixels = IntArray(LUMINANCE_SAMPLE_SIZE * LUMINANCE_SAMPLE_SIZE)
     var sensorOrientation: Int = 90
     var previewSize: Size? = null
     var previewSurface: Surface? = null
@@ -1259,58 +1280,68 @@ private class CameraSessionHolder {
         var timeoutToken: Any? = null
     }
 
-    private fun checkFrameLuminance() {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastLuminanceCheckTime > 300) {
-            lastLuminanceCheckTime = now
-            val view = textureView ?: return
-            try {
-                val bitmap = view.getBitmap(16, 16)
-                if (bitmap != null) {
-                    var totalLuminance = 0.0
-                    val pixels = IntArray(256)
-                    bitmap.getPixels(pixels, 0, 16, 0, 0, 16, 16)
-                    bitmap.recycle()
-                    for (p in pixels) {
-                        val r = (p shr 16) and 0xFF
-                        val g = (p shr 8) and 0xFF
-                        val b = p and 0xFF
-                        totalLuminance += (0.299 * r + 0.587 * g + 0.114 * b)
-                    }
-                    val avg = totalLuminance / 256.0
-                    isLowLightLuminance = avg < 55.0
-                }
-            } catch (_: Exception) {}
-        }
+    fun onPreviewStarted(nowMs: Long = SystemClock.elapsedRealtime()) {
+        autoFlashDecision.onPreviewStarted(nowMs)
+        isDarkScene = false
+    }
+
+    private fun checkFrameLuminance(now: Long) {
+        if (now - lastLuminanceCheckTime < LUMINANCE_SAMPLE_INTERVAL_MS) return
+        lastLuminanceCheckTime = now
+        val view = textureView ?: return
+        try {
+            val bitmap = luminanceBitmap ?: Bitmap.createBitmap(
+                LUMINANCE_SAMPLE_SIZE,
+                LUMINANCE_SAMPLE_SIZE,
+                Bitmap.Config.ARGB_8888
+            ).also { luminanceBitmap = it }
+            view.getBitmap(bitmap)
+            bitmap.getPixels(
+                luminancePixels,
+                0,
+                LUMINANCE_SAMPLE_SIZE,
+                0,
+                0,
+                LUMINANCE_SAMPLE_SIZE,
+                LUMINANCE_SAMPLE_SIZE
+            )
+            var totalLuminance = 0.0
+            for (p in luminancePixels) {
+                val r = (p shr 16) and 0xFF
+                val g = (p shr 8) and 0xFF
+                val b = p and 0xFF
+                totalLuminance += (0.299 * r + 0.587 * g + 0.114 * b)
+            }
+            autoFlashDecision.onPreviewLuma(
+                now,
+                (totalLuminance / luminancePixels.size).toFloat()
+            )
+        } catch (_: Exception) {}
     }
 
     fun updateAEState(result: TotalCaptureResult) {
-        val aeState = result.get(CaptureResult.CONTROL_AE_STATE)
-        val isFlashReq = (aeState == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED)
+        val now = SystemClock.elapsedRealtime()
+        val flashRequired = result.get(CaptureResult.CONTROL_AE_STATE) ==
+            CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED
 
-        val exposureTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
-        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+        checkFrameLuminance(now)
 
-        val isLowLightSensor = if (exposureTime != null && iso != null && exposureTime > 0) {
-            val exposureMs = exposureTime / 1_000_000.0
-            (exposureMs * iso) > 15000.0
-        } else {
-            false
-        }
-
-        checkFrameLuminance()
-
-        val newDarkScene = isFlashReq || isLowLightSensor || isLowLightLuminance
-        if (newDarkScene != isDarkScene) {
-            isDarkScene = newDarkScene
-            val ctx = context
-            if (ctx != null) {
-                ContextCompat.getMainExecutor(ctx).execute {
-                    onDarkSceneChanged?.invoke(newDarkScene)
-                }
-            } else {
+        val newDarkScene = autoFlashDecision.update(
+            nowMs = now,
+            iso = result.get(CaptureResult.SENSOR_SENSITIVITY),
+            exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+            flashRequired = flashRequired,
+            hasHardwareFlash = hasFlash
+        )
+        if (newDarkScene == isDarkScene) return
+        isDarkScene = newDarkScene
+        val ctx = context
+        if (ctx != null) {
+            ContextCompat.getMainExecutor(ctx).execute {
                 onDarkSceneChanged?.invoke(newDarkScene)
             }
+        } else {
+            onDarkSceneChanged?.invoke(newDarkScene)
         }
     }
 
@@ -1372,7 +1403,7 @@ private class CameraSessionHolder {
                 updateAEState(result)
                 updateAFState(result)
                 if (forRecording && isRecording && hasFlash && flashMode == FlashMode.AUTO) {
-                    videoRequestBuilder?.let { checkAndUpdateRecordingFlash(session, it) }
+                    videoRequestBuilder?.let { enableRecordingTorchIfDark(session, it) }
                 }
             }
         }
@@ -1812,7 +1843,7 @@ private class CameraSessionHolder {
         val sess = session ?: return
         if (isClosed || isRecording) return
         try {
-            applyFlashMode(builder, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+            applyFlashMode(builder, flashMode, hasFlash)
             applyFocusMetering(builder)
             sess.setRepeatingRequest(
                 builder.build(),
@@ -1835,6 +1866,7 @@ private class CameraSessionHolder {
         val reader = imageReader
         val chars = characteristics
         val ctx = context
+        val autoFlashAtShutter = flashMode == FlashMode.AUTO && isDarkScene
 
         // For front-facing cameras, the preview is inherently mirrored by the
         // TextureView.  The isMirrored flag controls an *additional* flip in the
@@ -1869,7 +1901,7 @@ private class CameraSessionHolder {
                     val captureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
                     captureBuilder.addTarget(reader.surface)
                     rawReader?.let { captureBuilder.addTarget(it.surface) }
-                    applyFlashMode(captureBuilder, flashMode, hasFlash, isStillCapture = true, isDarkScene = isDarkScene)
+                    applyFlashMode(captureBuilder, flashMode, hasFlash, isStillCapture = true, allowAutoFlash = autoFlashAtShutter)
                     applyFocusMetering(captureBuilder)
                     captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
                     captureBuilder.set(CaptureRequest.JPEG_QUALITY, 95.toByte())
@@ -1882,11 +1914,11 @@ private class CameraSessionHolder {
                         ) {
                             super.onCaptureCompleted(session, request, result)
                             onStillCaptureCompleted(result, pending)
-                            if (hasFlash && (flashMode == FlashMode.ON || (flashMode == FlashMode.AUTO && isDarkScene))) {
+                            if (hasFlash && (flashMode == FlashMode.ON || autoFlashAtShutter)) {
                                 try {
                                     val cancelBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                                         previewSurface?.let { addTarget(it) }
-                                        applyFlashMode(this, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+                                        applyFlashMode(this, flashMode, hasFlash)
                                         applyFocusMetering(this)
                                         set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
                                     }
@@ -1905,17 +1937,29 @@ private class CameraSessionHolder {
 
             // Run precapture trigger when using hardware flash in ON or (AUTO and dark) mode
             val needsPrecapture = hasFlash && previewSurface != null && (
-                flashMode == FlashMode.ON || (flashMode == FlashMode.AUTO && isDarkScene)
+                flashMode == FlashMode.ON || autoFlashAtShutter
             )
             if (needsPrecapture) {
                 try {
                     val precaptureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                         previewSurface?.let { addTarget(it) }
-                        applyFlashMode(this, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+                        applyFlashMode(this, flashMode, hasFlash, allowAutoFlash = autoFlashAtShutter)
                         applyFocusMetering(this)
                         set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
                     }
                     var captured = false
+                    var sawPrecapture = false
+                    var completedFrames = 0
+                    val finishPrecapture = {
+                        if (!captured) {
+                            captured = true
+                            // The delayed timeout can outlive the session (e.g.
+                            // the user switches lens right after the shutter).
+                            if (!isClosed && session === sess) {
+                                doStillCapture()
+                            }
+                        }
+                    }
                     sess.capture(precaptureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
                             session: CameraCaptureSession,
@@ -1923,10 +1967,24 @@ private class CameraSessionHolder {
                             result: TotalCaptureResult
                         ) {
                             super.onCaptureCompleted(session, request, result)
-                            if (!captured) {
-                                captured = true
-                                doStillCapture()
+                            // Wait for the preflash/metering sequence to settle
+                            // before taking the still. Capturing on the first
+                            // frame can abort the sequence and skip the flash.
+                            completedFrames++
+                            val aeState = result.get(CaptureResult.CONTROL_AE_STATE)
+                            val settled = when {
+                                aeState == null -> true
+                                aeState == CaptureResult.CONTROL_AE_STATE_PRECAPTURE -> {
+                                    sawPrecapture = true
+                                    false
+                                }
+                                aeState == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> true
+                                aeState == CaptureResult.CONTROL_AE_STATE_LOCKED -> true
+                                aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED ->
+                                    sawPrecapture || completedFrames > 1
+                                else -> false
                             }
+                            if (settled) finishPrecapture()
                         }
 
                         override fun onCaptureFailed(
@@ -1935,12 +1993,13 @@ private class CameraSessionHolder {
                             failure: CaptureFailure
                         ) {
                             super.onCaptureFailed(session, request, failure)
-                            if (!captured) {
-                                captured = true
-                                doStillCapture()
-                            }
+                            finishPrecapture()
                         }
                     }, backgroundHandler)
+
+                    // Do not leave the shutter waiting on a HAL that never
+                    // finishes the precapture sequence.
+                    backgroundHandler?.postDelayed({ finishPrecapture() }, PRECAPTURE_TIMEOUT_MS)
                 } catch (e: Exception) {
                     Log.e("Camera2Preview", "Error starting AE precapture trigger, proceeding with direct capture", e)
                     doStillCapture()
@@ -2101,21 +2160,29 @@ private class CameraSessionHolder {
         }
     }
 
-    private fun checkAndUpdateRecordingFlash(session: CameraCaptureSession, recordBuilder: CaptureRequest.Builder) {
-        val shouldTorch = isDarkScene
-        if (shouldTorch != isTorchOnDuringRecording) {
-            isTorchOnDuringRecording = shouldTorch
-            val flashValue = if (shouldTorch) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF
-            recordBuilder.set(CaptureRequest.FLASH_MODE, flashValue)
-            try {
-                session.setRepeatingRequest(
-                    recordBuilder.build(),
-                    createRepeatingCallback(forRecording = true),
-                    backgroundHandler
-                )
-            } catch (e: Exception) {
-                Log.e("Camera2Preview", "Failed to update torch during video recording", e)
-            }
+    /**
+     * Turns the recording torch on once the scene has been measured as dark.
+     * It is deliberately never switched off while recording: the torch itself
+     * brightens the preview, which would otherwise make the detector flip back
+     * and strobe the torch.
+     */
+    private fun enableRecordingTorchIfDark(
+        session: CameraCaptureSession,
+        recordBuilder: CaptureRequest.Builder
+    ) {
+        if (isTorchOnDuringRecording || !isDarkScene) return
+        isTorchOnDuringRecording = true
+        recordBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+        try {
+            session.setRepeatingRequest(
+                recordBuilder.build(),
+                createRepeatingCallback(forRecording = true),
+                backgroundHandler
+            )
+        } catch (e: Exception) {
+            isTorchOnDuringRecording = false
+            recordBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+            Log.e("Camera2Preview", "Failed to enable torch during video recording", e)
         }
     }
 
@@ -2145,6 +2212,7 @@ private class CameraSessionHolder {
         val uri = currentRecordingUri
 
         isRecording = false
+        isTorchOnDuringRecording = false
 
         videoRequestBuilder = null
         if (supportsAutoFocus) {
@@ -2208,7 +2276,7 @@ private class CameraSessionHolder {
 
             val previewBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             previewBuilder.addTarget(prevSurface)
-            applyFlashMode(previewBuilder, flashMode, hasFlash, isStillCapture = false, isDarkScene = isDarkScene)
+            applyFlashMode(previewBuilder, flashMode, hasFlash)
             applyFocusMetering(previewBuilder)
             previewRequestBuilder = previewBuilder
 
@@ -2331,6 +2399,7 @@ private class CameraSessionHolder {
         surfaceTexture = null
         viewTransform.reset()
         textureView = null
+        luminanceBitmap = null
         previewSurface = null
     }
 }
@@ -2632,7 +2701,7 @@ private fun openCameraSession(
                         requestBuilder.addTarget(previewSurface)
 
                         val currentFlashMode = holder.flashMode
-                        applyFlashMode(requestBuilder, currentFlashMode, hasFlash, isStillCapture = false, isDarkScene = holder.isDarkScene)
+                        applyFlashMode(requestBuilder, currentFlashMode, hasFlash)
                         holder.applyFocusMetering(requestBuilder)
                         holder.previewRequestBuilder = requestBuilder
 
@@ -2655,6 +2724,7 @@ private fun openCameraSession(
                                         return
                                     }
                                     try {
+                                        holder.onPreviewStarted()
                                         session.setRepeatingRequest(
                                             requestBuilder.build(),
                                             holder.createRepeatingCallback(forRecording = false),
