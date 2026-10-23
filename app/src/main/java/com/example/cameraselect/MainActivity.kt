@@ -600,10 +600,9 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             )
         }
 
-        // 4. Top-Left Flash Toggle Icon (Disabled while recording)
+        // 4. Top-Left Flash Toggle Icon
         IconButton(
-            onClick = { if (!isRecording) viewModel.cycleFlashMode() },
-            enabled = !isRecording,
+            onClick = { viewModel.cycleFlashMode() },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
@@ -617,13 +616,13 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.FlashAuto,
                         contentDescription = "Flash Auto",
-                        tint = activeIconTint,
+                        tint = Color.White,
                         modifier = Modifier.size(44.dp)
                     )
                 }
                 FlashMode.OFF -> {
                     FlashOffCustomIcon(
-                        isRecording = isRecording,
+                        isRecording = false,
                         modifier = Modifier.size(44.dp)
                     )
                 }
@@ -631,7 +630,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.FlashOn,
                         contentDescription = "Flash On",
-                        tint = activeIconTint,
+                        tint = Color.White,
                         modifier = Modifier.size(44.dp)
                     )
                 }
@@ -639,7 +638,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     Icon(
                         imageVector = Icons.Default.Lightbulb,
                         contentDescription = "Torch Light",
-                        tint = activeIconTint,
+                        tint = Color.White,
                         modifier = Modifier.size(44.dp)
                     )
                 }
@@ -1906,9 +1905,35 @@ private class CameraSessionHolder {
 
     fun updateFlash(mode: FlashMode) {
         flashMode = mode
+        if (isClosed) return
+        if (isRecording) {
+            val recBuilder = videoRequestBuilder ?: return
+            val sess = session ?: return
+            if (hasFlash) {
+                if (flashMode == FlashMode.TORCH) {
+                    recBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    recBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                    isTorchOnDuringRecording = true
+                } else {
+                    recBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    recBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    isTorchOnDuringRecording = false
+                }
+                try {
+                    sess.setRepeatingRequest(
+                        recBuilder.build(),
+                        createRepeatingCallback(forRecording = true),
+                        backgroundHandler
+                    )
+                } catch (e: Exception) {
+                    Log.e("Camera2Preview", "Error updating flash mode during recording", e)
+                }
+            }
+            return
+        }
+
         val builder = previewRequestBuilder ?: return
         val sess = session ?: return
-        if (isClosed || isRecording) return
         try {
             applyFlashMode(builder, flashMode, hasFlash)
             applyFocusMetering(builder)
@@ -2258,11 +2283,7 @@ private class CameraSessionHolder {
                             }
                             applyFocusMetering(recordBuilder)
 
-                            val shouldTorch = hasFlash && (
-                                flashMode == FlashMode.ON ||
-                                flashMode == FlashMode.TORCH ||
-                                (flashMode == FlashMode.AUTO && isDarkScene)
-                            )
+                            val shouldTorch = hasFlash && flashMode == FlashMode.TORCH
 
                             if (shouldTorch) {
                                 recordBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)

@@ -125,11 +125,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cycleFlashMode() {
-        val nextMode = when (_flashMode.value) {
-            FlashMode.AUTO -> FlashMode.OFF
-            FlashMode.OFF -> FlashMode.ON
-            FlashMode.ON -> FlashMode.TORCH
-            FlashMode.TORCH -> FlashMode.AUTO
+        val nextMode = if (_captureMode.value == CaptureMode.VIDEO) {
+            if (_flashMode.value == FlashMode.OFF) FlashMode.TORCH else FlashMode.OFF
+        } else {
+            when (_flashMode.value) {
+                FlashMode.AUTO -> FlashMode.OFF
+                FlashMode.OFF -> FlashMode.ON
+                FlashMode.ON -> FlashMode.TORCH
+                FlashMode.TORCH -> FlashMode.AUTO
+            }
         }
         _flashMode.value = nextMode
         repository.setFlashMode(nextMode)
@@ -172,6 +176,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setCaptureMode(mode: CaptureMode) {
         if (!_isRecording.value) {
             _captureMode.value = mode
+            if (mode == CaptureMode.VIDEO && (_flashMode.value == FlashMode.AUTO || _flashMode.value == FlashMode.ON)) {
+                _flashMode.value = FlashMode.OFF
+                repository.setFlashMode(FlashMode.OFF)
+            }
         }
     }
 
