@@ -15,10 +15,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -121,79 +126,112 @@ fun CameraSettingsDialog(
             color = Color.White,
             tonalElevation = 8.dp
         ) {
-            Column(
-                modifier = Modifier
-                    .drawScrollbar(scrollState)
-                    .verticalScroll(scrollState)
-                    .padding(
-                        horizontal = if (isLandscape) 18.dp else 24.dp,
-                        vertical = if (isLandscape) 18.dp else 28.dp
+            Column {
+                // Fixed header: stays pinned to the top of the card while the
+                // settings below it scroll, keeping the close button reachable.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = if (isLandscape) 18.dp else 24.dp,
+                            end = if (isLandscape) 18.dp else 24.dp,
+                            top = if (isLandscape) 18.dp else 28.dp,
+                            bottom = if (isLandscape) 12.dp else 20.dp
+                        ),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (facing == LensFacing.FRONT) "Front" else "Rear",
+                        fontSize = if (isLandscape) 20.sp else 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
                     )
-            ) {
-                // Title: Front or Rear
-                Text(
-                    text = if (facing == LensFacing.FRONT) "Front" else "Rear",
-                    fontSize = if (isLandscape) 20.sp else 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black,
-                    modifier = Modifier.padding(bottom = if (isLandscape) 12.dp else 20.dp)
-                )
 
-                // 1. Standard Lenses List
-                for (camera in standardCameras) {
-                    CameraSettingItem(
-                        camera = camera,
-                        isChecked = enabledCameraIds.contains(camera.id),
-                        onToggle = { onToggleCameraEnabled(camera.id) },
-                        isLandscape = isLandscape
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(if (isLandscape) 6.dp else 12.dp))
-
-                // 2. Mirror image Toggle Row
-                SettingToggleRow(
-                    label = "Mirror image",
-                    checked = isMirrored,
-                    onToggle = onToggleIsMirrored,
-                    isLandscape = isLandscape
-                )
-
-                // 3. No camera crop Toggle Row
-                SettingToggleRow(
-                    label = "No camera crop",
-                    checked = noCrop,
-                    onToggle = onToggleNoCrop,
-                    isLandscape = isLandscape
-                )
-
-                // 4. Show hidden lenses Toggle Row
-                SettingToggleRow(
-                    label = "Show hidden lenses",
-                    checked = showHidden,
-                    onToggle = onToggleShowHidden,
-                    isLandscape = isLandscape
-                )
-
-                // 5. Hidden Lenses List (Shown when showHidden is true)
-                if (showHidden) {
-                    Spacer(modifier = Modifier.height(if (isLandscape) 4.dp else 8.dp))
-                    if (hiddenCameras.isNotEmpty()) {
-                        for (camera in hiddenCameras) {
-                            CameraSettingItem(
-                                camera = camera,
-                                isChecked = enabledCameraIds.contains(camera.id),
-                                onToggle = { onToggleCameraEnabled(camera.id) },
-                                isLandscape = isLandscape
+                    Surface(
+                        onClick = onDismissRequest,
+                        shape = CircleShape,
+                        color = Color(0xFFF0F0F0),
+                        contentColor = Color.DarkGray,
+                        modifier = Modifier.size(if (isLandscape) 28.dp else 32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close settings",
+                                modifier = Modifier.size(if (isLandscape) 18.dp else 20.dp)
                             )
                         }
-                    } else {
-                        Text(
-                            text = "No hidden lenses detected on this device",
-                            fontSize = 14.sp,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .drawScrollbar(scrollState)
+                        .verticalScroll(scrollState)
+                        .padding(
+                            start = if (isLandscape) 18.dp else 24.dp,
+                            end = if (isLandscape) 18.dp else 24.dp,
+                            bottom = if (isLandscape) 18.dp else 28.dp
                         )
+                ) {
+                    // 1. Standard Lenses List
+                    for (camera in standardCameras) {
+                        CameraSettingItem(
+                            camera = camera,
+                            isChecked = enabledCameraIds.contains(camera.id),
+                            onToggle = { onToggleCameraEnabled(camera.id) },
+                            isLandscape = isLandscape
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(if (isLandscape) 6.dp else 12.dp))
+
+                    // 2. Mirror image Toggle Row
+                    SettingToggleRow(
+                        label = "Mirror image",
+                        checked = isMirrored,
+                        onToggle = onToggleIsMirrored,
+                        isLandscape = isLandscape
+                    )
+
+                    // 3. No camera crop Toggle Row
+                    SettingToggleRow(
+                        label = "No camera crop",
+                        checked = noCrop,
+                        onToggle = onToggleNoCrop,
+                        isLandscape = isLandscape
+                    )
+
+                    // 4. Show hidden lenses Toggle Row
+                    SettingToggleRow(
+                        label = "Show hidden lenses",
+                        checked = showHidden,
+                        onToggle = onToggleShowHidden,
+                        isLandscape = isLandscape
+                    )
+
+                    // 5. Hidden Lenses List (Shown when showHidden is true)
+                    if (showHidden) {
+                        Spacer(modifier = Modifier.height(if (isLandscape) 4.dp else 8.dp))
+                        if (hiddenCameras.isNotEmpty()) {
+                            for (camera in hiddenCameras) {
+                                CameraSettingItem(
+                                    camera = camera,
+                                    isChecked = enabledCameraIds.contains(camera.id),
+                                    onToggle = { onToggleCameraEnabled(camera.id) },
+                                    isLandscape = isLandscape
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "No hidden lenses detected on this device",
+                                fontSize = 14.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
