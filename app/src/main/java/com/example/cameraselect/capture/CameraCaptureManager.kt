@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import androidx.core.content.ContextCompat
+import com.example.cameraselect.model.ManualCapabilities
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,8 +61,32 @@ object CameraCaptureManager {
         }
     }
 
-    fun supportsRawCapture(characteristics: CameraCharacteristics): Boolean {
-        val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+    /**
+     * Reads the manual-sensor and manual-focus capabilities of a lens.
+     * A lens without MANUAL_SENSOR simply shows disabled Pro controls.
+     */
+    fun readManualCapabilities(characteristics: CameraCharacteristics): ManualCapabilities {
+        val available = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+        val supportsManualSensor =
+            available?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+
+        val isoRange = characteristics
+            .get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            ?.let { it.lower..it.upper }
+        val exposureRange = characteristics
+            .get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            ?.let { it.lower..it.upper }
+        val minFocus = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+
+        return ManualCapabilities(
+            supportsManualSensor = supportsManualSensor,
+            isoRange = isoRange,
+            exposureRangeNs = exposureRange,
+            minimumFocusDistance = minFocus
+        )
+    }
+
+    fun supportsRawCapture(characteristics: CameraCharacteristics): Boolean {        val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
         if (capabilities?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW) != true) {
             return false
         }

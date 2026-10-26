@@ -136,8 +136,14 @@ import com.example.cameraselect.capture.RearFlashPlanner
 import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.CaptureMode
 import com.example.cameraselect.model.LensFacing
+import com.example.cameraselect.model.ManualCameraSettings
+import com.example.cameraselect.model.ManualCameraValues
+import com.example.cameraselect.model.ManualCapabilities
+import com.example.cameraselect.model.ManualControlTarget
 import com.example.cameraselect.model.PhotoFormat
 import com.example.cameraselect.ui.CameraSettingsDialog
+import com.example.cameraselect.ui.pro.ProCameraDock
+import com.example.cameraselect.ui.pro.ProControlPanel
 import com.example.cameraselect.ui.theme.CameraSelectTheme
 import com.example.cameraselect.viewmodel.CameraViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -340,6 +346,33 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val buttonRotation = rememberDeviceRotation()
     val captureController = remember { CameraCaptureController() }
 
+    // Pro manual controls. The settings live in the controller so they survive
+    // mode switches; the capability/live values come from the open camera.
+    val manualSettings = captureController.manualSettingsState.value
+    val manualCapabilities = captureController.manualCapabilitiesState.value
+    var openProControl by remember { mutableStateOf<ManualControlTarget?>(null) }
+    val isProMode = captureMode == CaptureMode.PRO_PHOTO
+    val isManualExposureActive = isProMode &&
+        manualSettings.manualExposure &&
+        manualCapabilities.supportsManualSensor &&
+        manualSettings.iso != null &&
+        manualSettings.shutterNs != null
+    // AE OFF and flash precapture metering cannot coexist, so manual exposure
+    // permits only the continuous torch.
+    val effectiveFlashMode = if (isManualExposureActive) {
+        if (flashMode == FlashMode.TORCH) FlashMode.TORCH else FlashMode.OFF
+    } else {
+        flashMode
+    }
+    // The flash toggle reflects what the sensor can actually do: AE OFF rules
+    // out AUTO/ON flash, while the continuous torch stays available.
+    val displayedFlashMode = if (isManualExposureActive) effectiveFlashMode else flashMode
+    val proVisibleRows = if (context.resources.configuration.screenHeightDp < 700) 4 else 5
+
+    LaunchedEffect(captureMode) {
+        if (captureMode != CaptureMode.PRO_PHOTO) openProControl = null
+    }
+
     // A wide pill rotated sideways needs extra headroom so it never sits under the status bar.
     val topControlsPadding by animateDpAsState(
         targetValue = if (isSidewaysRotation(buttonRotation)) 48.dp else 16.dp,
@@ -347,9 +380,9 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
         label = "topControlsPadding"
     )
 
-    val isTorchScreenFlashActive = (flashMode == FlashMode.TORCH) && !hasPhysicalFlashForSelectedCamera
+    val isTorchScreenFlashActive = (effectiveFlashMode == FlashMode.TORCH) && !hasPhysicalFlashForSelectedCamera
     val isRecordingScreenFlashActive = isRecording && !hasPhysicalFlashForSelectedCamera && (
-        flashMode == FlashMode.ON || flashMode == FlashMode.TORCH || (flashMode == FlashMode.AUTO && captureController.isDarkScene())
+        effectiveFlashMode == FlashMode.ON || effectiveFlashMode == FlashMode.TORCH || (effectiveFlashMode == FlashMode.AUTO && captureController.isDarkScene())
     )
 
     val isScreenFlashActive = isTorchScreenFlashActive ||
@@ -361,7 +394,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             rawUnavailableCameraId != selectedCameraId &&
             allCameras.firstOrNull { it.id == selectedCameraId }?.supportsRaw == true
     }
-    val isRawCaptureEnabled = captureMode == CaptureMode.PHOTO &&
+    val isRawCaptureEnabled = captureMode.isPhoto &&
         photoFormat == PhotoFormat.JPEG_PLUS_RAW &&
         selectedLensSupportsRaw
 
@@ -442,7 +475,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
 
     // Photo Capture action
     val onTakePhoto: () -> Unit = {
-        val needsScreenFlash = !hasPhysicalFlashForSelectedCamera && when (flashMode) {
+        val needsScreenFlash = !hasPhysicalFlashForSelectedCamera && when (effectiveFlashMode) {
             FlashMode.OFF -> false
             FlashMode.ON -> true
             FlashMode.AUTO -> captureController.isDarkScene()
@@ -571,6 +604,8 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 deviceRotationDegrees = buttonRotation.toInt(),
                 captureRaw = isRawCaptureEnabled,
                 isVideoMode = captureMode == CaptureMode.VIDEO,
+                isProMode = isProMode,
+                manualSettings = manualSettings,
                 captureController = captureController,
                 onHasFlashChanged = { hasPhysicalFlash ->
                     hasPhysicalFlashForSelectedCamera = hasPhysicalFlash
@@ -600,9 +635,26 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             )
         }
 
-        // 4. Top-Left Flash Toggle Icon
+        // 4. Pro wheel dismiss layer: tapping the preview closes the expanded wheel.
+        if (openProControl != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { openProControl = null }
+                    }
+            )
+        }
+
+        // 5. Top-Left Flash Toggle Icon
         IconButton(
-            onClick = { viewModel.cycleFlashMode() },
+            onClick = {
+                if (isManualExposureActive) {
+                    viewModel.cycleManualExposureFlashMode()
+                } else {
+                    viewModel.cycleFlashMode()
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
@@ -611,7 +663,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 .size(56.dp)
                 .rotate(buttonRotation)
         ) {
-            when (flashMode) {
+            when (displayedFlashMode) {
                 FlashMode.AUTO -> {
                     Icon(
                         imageVector = Icons.Default.FlashAuto,
@@ -666,7 +718,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (captureMode == CaptureMode.PHOTO && selectedLensSupportsRaw) {
+            if (captureMode.isPhoto && selectedLensSupportsRaw) {
                 PhotoFormatSelector(
                     currentFormat = photoFormat,
                     onFormatSelected = { viewModel.setPhotoFormat(it) }
@@ -720,16 +772,148 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 }
             }
 
-            // Mode Selector Pill (PHOTO / VIDEO) - only displayed when not recording
+            // Mode Selector Pill (PHOTO / VIDEO / PRO) - only displayed when not recording
             if (!isRecording) {
                 CaptureModeSelector(
                     currentMode = captureMode,
                     onModeSelected = { mode -> viewModel.setCaptureMode(mode) },
                     modifier = Modifier
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = if (isProMode) 10.dp else 16.dp)
                 )
             } else {
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // Pro manual controls: the wheel is only laid out while open, so the
+            // preview stays clear the rest of the time.
+            if (!isRecording && isProMode) {
+                if (openProControl != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        ProControlPanel(
+                            target = openProControl!!,
+                            controller = captureController,
+                            settings = manualSettings,
+                            capabilities = manualCapabilities,
+                            rotationDegrees = buttonRotation,
+                            visibleRows = proVisibleRows,
+                            onStopSelected = { index ->
+                                val current = captureController.manualSettingsState.value
+                                when (openProControl) {
+                                    ManualControlTarget.ISO -> {
+                                        ManualCameraValues.isoStops(manualCapabilities)
+                                            .getOrNull(index)
+                                            ?.let { stop ->
+                                                val base = if (current.manualExposure) {
+                                                    current
+                                                } else {
+                                                    ManualCameraValues.lockExposure(
+                                                        current,
+                                                        manualCapabilities,
+                                                        captureController.liveIsoState.value,
+                                                        captureController.liveShutterState.value
+                                                    )
+                                                }
+                                                captureController.manualSettingsState.value =
+                                                    base.withIso(stop.value)
+                                            }
+                                    }
+
+                                    ManualControlTarget.SHUTTER -> {
+                                        ManualCameraValues.shutterStops(manualCapabilities)
+                                            .getOrNull(index)
+                                            ?.let { stop ->
+                                                val base = if (current.manualExposure) {
+                                                    current
+                                                } else {
+                                                    ManualCameraValues.lockExposure(
+                                                        current,
+                                                        manualCapabilities,
+                                                        captureController.liveIsoState.value,
+                                                        captureController.liveShutterState.value
+                                                    )
+                                                }
+                                                captureController.manualSettingsState.value =
+                                                    base.withShutter(stop.value)
+                                            }
+                                    }
+
+                                    ManualControlTarget.FOCUS -> {
+                                        val stops = ManualCameraValues.focusStops(manualCapabilities)
+                                        stops.getOrNull(index)?.let { stop ->
+                                            val base = if (current.manualFocus) {
+                                                current
+                                            } else {
+                                                ManualCameraValues.lockFocus(
+                                                    current,
+                                                    manualCapabilities,
+                                                    captureController.liveFocusState.value,
+                                                    0f
+                                                )
+                                            }
+                                            captureController.manualSettingsState.value =
+                                                base.withFocus(stop.value)
+                                        }
+                                    }
+
+                                    null -> Unit
+                                }
+                            },
+                            onAutoToggle = {
+                                val current = captureController.manualSettingsState.value
+                                when (openProControl) {
+                                    ManualControlTarget.ISO,
+                                    ManualControlTarget.SHUTTER -> {
+                                        captureController.manualSettingsState.value =
+                                            if (current.manualExposure) {
+                                                current.copy(manualExposure = false)
+                                            } else {
+                                                ManualCameraValues.lockExposure(
+                                                    current,
+                                                    manualCapabilities,
+                                                    captureController.liveIsoState.value,
+                                                    captureController.liveShutterState.value
+                                                )
+                                            }
+                                    }
+
+                                    ManualControlTarget.FOCUS -> {
+                                        captureController.manualSettingsState.value =
+                                            if (current.manualFocus) {
+                                                current.copy(manualFocus = false)
+                                            } else {
+                                                ManualCameraValues.lockFocus(
+                                                    current,
+                                                    manualCapabilities,
+                                                    captureController.liveFocusState.value,
+                                                    0f
+                                                )
+                                            }
+                                    }
+
+                                    null -> Unit
+                                }
+                            },
+                            onClose = { openProControl = null }
+                        )
+                    }
+                }
+
+                ProCameraDock(
+                    controller = captureController,
+                    settings = manualSettings,
+                    capabilities = manualCapabilities,
+                    openControl = openProControl,
+                    rotationDegrees = buttonRotation,
+                    onControlClick = { target ->
+                        openProControl = if (openProControl == target) null else target
+                    },
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
             }
 
             // Main Shutter Controls Row (Gallery Thumbnail | Shutter Button | Camera Flip Switch)
@@ -822,6 +1006,11 @@ fun CaptureModeSelector(
                 title = "VIDEO",
                 isSelected = currentMode == CaptureMode.VIDEO,
                 onClick = { onModeSelected(CaptureMode.VIDEO) }
+            )
+            CaptureModeItem(
+                title = "PRO",
+                isSelected = currentMode == CaptureMode.PRO_PHOTO,
+                onClick = { onModeSelected(CaptureMode.PRO_PHOTO) }
             )
         }
     }
@@ -921,7 +1110,7 @@ fun CaptureShutterButton(
     )
 
     when (captureMode) {
-        CaptureMode.PHOTO -> {
+        CaptureMode.PHOTO, CaptureMode.PRO_PHOTO -> {
             Box(
                 modifier = modifier
                     .background(Color.Black.copy(alpha = 0.35f), CircleShape)
@@ -1197,6 +1386,14 @@ private class CameraSessionHolder {
     var previewRequestBuilder: CaptureRequest.Builder? = null
     var hasFlash: Boolean = false
     var flashMode: FlashMode = FlashMode.OFF
+
+    // Pro manual exposure / focus state.
+    @Volatile var isProMode: Boolean = false
+    @Volatile var manualSettings: ManualCameraSettings = ManualCameraSettings()
+    @Volatile var manualCapabilities: ManualCapabilities = ManualCapabilities.UNSUPPORTED
+    var onManualCapabilitiesChanged: ((ManualCapabilities) -> Unit)? = null
+    var onManualValuesChanged: ((Int?, Long?, Float?) -> Unit)? = null
+    private var lastManualValuePushMs: Long = 0L
     /** Video mode keeps the original sensor/luma auto-torch detector. */
     @Volatile var isVideoMode: Boolean = false
     @Volatile var isDarkScene: Boolean = false
@@ -1380,7 +1577,16 @@ private class CameraSessionHolder {
         latestAeFlashState = flashState
         latestAeFlashStateTimeMs = now
 
+        if (isProMode) publishManualValues(result, now)
+
         if (flashSequenceActive) return
+
+        // With AE off the ISO/exposure in the result are the values we set, so
+        // they say nothing about scene brightness and must not drive flash logic.
+        if (isManualExposureActive()) {
+            updateDarkScene(false)
+            return
+        }
 
         checkFrameLuminance(now)
 
@@ -1393,19 +1599,135 @@ private class CameraSessionHolder {
             // Video's plain-AE CONVERGED state must not suppress the auto-torch.
             useHalVeto = !isVideoMode && !isRecording
         )
-        if (newDarkScene == isDarkScene) return
-        isDarkScene = newDarkScene
-        Log.d(
-            "CameraFlash",
-            "dark=$newDarkScene reason=${autoFlashDecision.reason} ae=$flashState"
-        )
+        updateDarkScene(newDarkScene, flashState)
+    }
+
+    private fun updateDarkScene(dark: Boolean, flashState: AeFlashState? = null) {
+        if (dark == isDarkScene) return
+        isDarkScene = dark
+        if (flashState != null) {
+            Log.d(
+                "CameraFlash",
+                "dark=$dark reason=${autoFlashDecision.reason} ae=$flashState"
+            )
+        }
         val ctx = context
         if (ctx != null) {
             ContextCompat.getMainExecutor(ctx).execute {
-                onDarkSceneChanged?.invoke(newDarkScene)
+                onDarkSceneChanged?.invoke(dark)
             }
         } else {
-            onDarkSceneChanged?.invoke(newDarkScene)
+            onDarkSceneChanged?.invoke(dark)
+        }
+    }
+
+    /**
+     * Streams the metered ISO/shutter/focus to the Pro dock. Throttled so a
+     * fast preview cannot flood the Compose UI with result callbacks.
+     */
+    private fun publishManualValues(result: TotalCaptureResult, now: Long) {
+        if (now - lastManualValuePushMs < 120L) return
+        val callback = onManualValuesChanged ?: return
+        lastManualValuePushMs = now
+
+        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+        val shutterNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        val focusDioptres = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+
+        val ctx = context
+        if (ctx != null) {
+            ContextCompat.getMainExecutor(ctx).execute {
+                callback(iso, shutterNs, focusDioptres)
+            }
+        } else {
+            callback(iso, shutterNs, focusDioptres)
+        }
+    }
+
+    fun isManualExposureActive(): Boolean =
+        isProMode &&
+            manualSettings.manualExposure &&
+            manualCapabilities.supportsManualSensor &&
+            manualSettings.iso != null &&
+            manualSettings.shutterNs != null
+
+    fun isManualFocusActive(): Boolean =
+        isProMode &&
+            manualSettings.manualFocus &&
+            manualCapabilities.supportsManualFocus &&
+            manualSettings.focusDioptres != null
+
+    /**
+     * Single place that decides AE, flash and AF for a request. Used by the
+     * preview, the still capture, session restarts and flash updates so manual
+     * settings can never be lost on one code path.
+     */
+    fun applyRequestSettings(
+        builder: CaptureRequest.Builder,
+        isStillCapture: Boolean = false,
+        autoFlashDark: Boolean = false
+    ) {
+        if (isManualExposureActive()) {
+            val iso = manualCapabilities.isoRange?.let {
+                (manualSettings.iso ?: 100).coerceIn(it)
+            } ?: (manualSettings.iso ?: 100)
+            val requestedExposure = manualSettings.shutterNs ?: 33_333_333L
+            val exposureNs = manualCapabilities.exposureRangeNs?.let {
+                requestedExposure.coerceIn(it)
+            } ?: requestedExposure
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs)
+            // Keep the frame duration at least as long as the exposure so long
+            // exposures are not truncated by the preview frame rate.
+            builder.set(CaptureRequest.SENSOR_FRAME_DURATION, maxOf(exposureNs, 33_333_333L))
+            builder.set(
+                CaptureRequest.FLASH_MODE,
+                if (flashMode == FlashMode.TORCH) {
+                    CaptureRequest.FLASH_MODE_TORCH
+                } else {
+                    CaptureRequest.FLASH_MODE_OFF
+                }
+            )
+        } else {
+            applyFlashMode(builder, flashMode, hasFlash, isStillCapture, autoFlashDark)
+        }
+
+        if (isManualFocusActive()) {
+            val maxFocus = manualCapabilities.minimumFocusDistance ?: 0f
+            val focus = (manualSettings.focusDioptres ?: 0f).coerceIn(0f, maxFocus)
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focus)
+            if (supportsAeRegions) {
+                aeRect?.let { builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
+            }
+        } else {
+            applyFocusMetering(builder)
+        }
+    }
+
+    /**
+     * Pushes Pro settings into a live preview. Called from the view's update
+     * block; early-returns unless something actually changed so ordinary
+     * recompositions do not re-send the repeating request.
+     */
+    fun updateManualMode(proModeActive: Boolean, settings: ManualCameraSettings) {
+        if (isProMode == proModeActive && manualSettings == settings) return
+        isProMode = proModeActive
+        manualSettings = settings
+
+        if (isClosed || isRecording) return
+        val builder = previewRequestBuilder ?: return
+        val sess = session ?: return
+        try {
+            applyRequestSettings(builder, isStillCapture = false)
+            sess.setRepeatingRequest(
+                builder.build(),
+                createRepeatingCallback(forRecording = false),
+                backgroundHandler
+            )
+        } catch (e: Exception) {
+            Log.e("Camera2Preview", "Error applying manual camera settings", e)
         }
     }
 
@@ -1563,6 +1885,9 @@ private class CameraSessionHolder {
      * falls outside the visible preview (e.g. the letterbox bars in no-crop mode).
      */
     fun tapToFocus(tapX: Float, tapY: Float): Boolean {
+        // In manual focus a tap would only move metering; keep the chosen
+        // focus distance and let the user adjust it on the wheel.
+        if (isManualFocusActive()) return false
         val view = textureView ?: return false
         val st = surfaceTexture ?: return false
         val chars = characteristics ?: return false
@@ -1865,7 +2190,7 @@ private class CameraSessionHolder {
         rawImageReader = null
     }
 
-    private fun scheduleCaptureTimeouts(pending: PendingPhotoCapture) {
+    private fun scheduleCaptureTimeouts(pending: PendingPhotoCapture, extraMs: Long = 0L) {
         val handler = backgroundHandler ?: return
         val token = Any()
         pending.timeoutToken = token
@@ -1884,7 +2209,7 @@ private class CameraSessionHolder {
                     finishPendingIfCompleteLocked(pending)
                 }
             }
-        }, 3000)
+        }, 3000 + extraMs)
 
         // Safety net so a missing frame can never leave the shutter permanently busy.
         handler.postDelayed({
@@ -1900,10 +2225,13 @@ private class CameraSessionHolder {
                 }
                 finishPendingIfCompleteLocked(pending)
             }
-        }, 10000)
+        }, 10000 + extraMs)
     }
 
     fun updateFlash(mode: FlashMode) {
+        // Recomposition calls this on every frame; a no-op unless the mode
+        // actually changed.
+        if (flashMode == mode) return
         flashMode = mode
         if (isClosed) return
         if (isRecording) {
@@ -1935,8 +2263,7 @@ private class CameraSessionHolder {
         val builder = previewRequestBuilder ?: return
         val sess = session ?: return
         try {
-            applyFlashMode(builder, flashMode, hasFlash)
-            applyFocusMetering(builder)
+            applyRequestSettings(builder, isStillCapture = false)
             sess.setRepeatingRequest(
                 builder.build(),
                 createRepeatingCallback(forRecording = false),
@@ -1958,7 +2285,8 @@ private class CameraSessionHolder {
         val reader = imageReader
         val chars = characteristics
         val ctx = context
-        val autoFlashAtShutter = shouldFireAutoFlash()
+        val manualExposure = isManualExposureActive()
+        val autoFlashAtShutter = if (manualExposure) false else shouldFireAutoFlash()
         val flashPlan = RearFlashPlanner.plan(
             flashMode = flashMode,
             hasFlash = hasFlash,
@@ -1969,7 +2297,7 @@ private class CameraSessionHolder {
             "CameraFlash",
             "shutter mode=$flashMode dark=$isDarkScene reason=$autoFlashReason " +
                 "ae=$latestAeFlashState autoFlash=$autoFlashAtShutter " +
-                "precapture=${flashPlan.needsPrecapture}"
+                "manual=$manualExposure precapture=${flashPlan.needsPrecapture}"
         )
 
         // For front-facing cameras, the preview is inherently mirrored by the
@@ -1997,7 +2325,10 @@ private class CameraSessionHolder {
             if (pendingPhoto != null) return false
             pendingPhoto = pending
         }
-        scheduleCaptureTimeouts(pending)
+        scheduleCaptureTimeouts(
+            pending,
+            extraMs = if (manualExposure) (manualSettings.shutterNs ?: 0L) / 1_000_000L else 0L
+        )
 
         if (dev != null && sess != null && reader != null && chars != null && ctx != null) {
             val doStillCapture = {
@@ -2005,8 +2336,11 @@ private class CameraSessionHolder {
                     val captureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
                     captureBuilder.addTarget(reader.surface)
                     rawReader?.let { captureBuilder.addTarget(it.surface) }
-                    applyFlashMode(captureBuilder, flashMode, hasFlash, isStillCapture = true, autoFlashDark = autoFlashAtShutter)
-                    applyFocusMetering(captureBuilder)
+                    applyRequestSettings(
+                        captureBuilder,
+                        isStillCapture = true,
+                        autoFlashDark = autoFlashAtShutter
+                    )
                     captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
                     captureBuilder.set(CaptureRequest.JPEG_QUALITY, 95.toByte())
 
@@ -2018,12 +2352,11 @@ private class CameraSessionHolder {
                         ) {
                             super.onCaptureCompleted(session, request, result)
                             onStillCaptureCompleted(result, pending)
-                            if (hasFlash && (flashMode == FlashMode.ON || autoFlashAtShutter)) {
+                            if (!manualExposure && hasFlash && (flashMode == FlashMode.ON || autoFlashAtShutter)) {
                                 try {
                                     val cancelBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                                         previewSurface?.let { addTarget(it) }
-                                        applyFlashMode(this, flashMode, hasFlash)
-                                        applyFocusMetering(this)
+                                        applyRequestSettings(this, isStillCapture = false)
                                         set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
                                     }
                                     session.capture(cancelBuilder.build(), null, backgroundHandler)
@@ -2039,20 +2372,24 @@ private class CameraSessionHolder {
                 }
             }
 
-            if (hasFlash && (flashMode == FlashMode.ON || autoFlashAtShutter)) {
+            if (!manualExposure && hasFlash && (flashMode == FlashMode.ON || autoFlashAtShutter)) {
                 beginFlashSequence()
             }
 
             // Run the AE precapture trigger when using the hardware flash in
             // ON, or in AUTO with a dark verdict. RearFlashPlanner is the
             // single source of truth for whether a capture needs it.
-            val needsPrecapture = flashPlan.needsPrecapture && previewSurface != null
+            val needsPrecapture =
+                !manualExposure && flashPlan.needsPrecapture && previewSurface != null
             if (needsPrecapture) {
                 try {
                     val precaptureBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                         previewSurface?.let { addTarget(it) }
-                        applyFlashMode(this, flashMode, hasFlash, isStillCapture = true, autoFlashDark = autoFlashAtShutter)
-                        applyFocusMetering(this)
+                        applyRequestSettings(
+                            this,
+                            isStillCapture = true,
+                            autoFlashDark = autoFlashAtShutter
+                        )
                         set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
                     }
                     val precaptureStartedAt = SystemClock.elapsedRealtime()
@@ -2444,8 +2781,7 @@ private class CameraSessionHolder {
 
             val previewBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             previewBuilder.addTarget(prevSurface)
-            applyFlashMode(previewBuilder, flashMode, hasFlash)
-            applyFocusMetering(previewBuilder)
+            applyRequestSettings(previewBuilder, isStillCapture = false)
             previewRequestBuilder = previewBuilder
 
             val rawReader = if (rawCaptureEnabled) ensureRawReader() else null
@@ -2582,6 +2918,8 @@ fun Camera2PreviewView(
     deviceRotationDegrees: Int = 0,
     captureRaw: Boolean = false,
     isVideoMode: Boolean = false,
+    isProMode: Boolean = false,
+    manualSettings: ManualCameraSettings = ManualCameraSettings(),
     captureController: CameraCaptureController,
     onHasFlashChanged: (Boolean) -> Unit = {},
     onRawUnavailable: () -> Unit = {},
@@ -2610,6 +2948,10 @@ fun Camera2PreviewView(
             holder.isVideoMode = isVideoMode
         }
 
+        LaunchedEffect(holder, isProMode, manualSettings) {
+            holder.updateManualMode(isProMode, manualSettings)
+        }
+
         DisposableEffect(holder, isMirrored) {
             holder.onDarkSceneChanged = { dark ->
                 captureController.isDarkSceneState.value = dark
@@ -2619,6 +2961,20 @@ fun Camera2PreviewView(
                 holder.takePhoto(isMirrored, rotationDegrees, saveRaw, onCaptured)
             }
             holder.onRawUnavailable = onRawUnavailable
+            holder.onManualCapabilitiesChanged = { capabilities ->
+                captureController.manualCapabilitiesState.value = capabilities
+                // A different lens can have tighter ISO/shutter/focus ranges,
+                // so keep the retained settings inside the new limits.
+                captureController.manualSettingsState.value = ManualCameraValues.normalize(
+                    captureController.manualSettingsState.value,
+                    capabilities
+                )
+            }
+            holder.onManualValuesChanged = { iso, shutter, focus ->
+                captureController.liveIsoState.value = iso
+                captureController.liveShutterState.value = shutter
+                captureController.liveFocusState.value = focus
+            }
             captureController.startRecordingAction = { rotationDegrees, onStarted, onError ->
                 holder.startRecording(rotationDegrees, onStarted, onError)
             }
@@ -2635,6 +2991,8 @@ fun Camera2PreviewView(
             onDispose {
                 holder.onDarkSceneChanged = null
                 holder.onFocusStateChanged = null
+                holder.onManualCapabilitiesChanged = null
+                holder.onManualValuesChanged = null
                 captureController.takePhotoAction = null
                 captureController.startRecordingAction = null
                 captureController.stopRecordingAction = null
@@ -2809,6 +3167,8 @@ private fun openCameraSession(
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         holder.characteristics = characteristics
         holder.configureFocusCapabilities(characteristics)
+        holder.manualCapabilities = CameraCaptureManager.readManualCapabilities(characteristics)
+        holder.onManualCapabilitiesChanged?.invoke(holder.manualCapabilities)
 
         val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
         holder.hasFlash = hasFlash
@@ -2873,9 +3233,7 @@ private fun openCameraSession(
                         val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                         requestBuilder.addTarget(previewSurface)
 
-                        val currentFlashMode = holder.flashMode
-                        applyFlashMode(requestBuilder, currentFlashMode, hasFlash)
-                        holder.applyFocusMetering(requestBuilder)
+                        holder.applyRequestSettings(requestBuilder, isStillCapture = false)
                         holder.previewRequestBuilder = requestBuilder
 
                         val outputConfigs = mutableListOf(OutputConfiguration(previewSurface))
