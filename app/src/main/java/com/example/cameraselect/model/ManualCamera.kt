@@ -78,7 +78,8 @@ object ManualCameraValues {
         25, 32, 40, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640,
         800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000,
         10000, 12800, 16000, 20000, 25600, 32000, 40000, 51200, 64000,
-        80000, 102400, 128000, 160000, 204800, 256000, 320000, 409600
+        80000, 102400, 128000, 160000, 204800, 256000, 320000, 409600,
+        512000, 640000, 819200, 1024000
     )
 
     /**
@@ -86,6 +87,15 @@ object ManualCameraValues {
      * a photographer expects to see, not raw nanosecond numbers.
      */
     private val SHUTTER_TABLE: List<ManualStop<Long>> = listOf(
+        "1/64000" to 1.0 / 64000,
+        "1/50000" to 1.0 / 50000,
+        "1/40000" to 1.0 / 40000,
+        "1/32000" to 1.0 / 32000,
+        "1/25000" to 1.0 / 25000,
+        "1/20000" to 1.0 / 20000,
+        "1/16000" to 1.0 / 16000,
+        "1/12500" to 1.0 / 12500,
+        "1/10000" to 1.0 / 10000,
         "1/8000" to 1.0 / 8000,
         "1/6400" to 1.0 / 6400,
         "1/5000" to 1.0 / 5000,
@@ -157,7 +167,8 @@ object ManualCameraValues {
         } else {
             standard
         }
-        return values.map { ManualStop(it, it.toString()) }
+        return withHardwareEndpoints(values, range.first, range.last)
+            .map { ManualStop(it, it.toString()) }
     }
 
     fun shutterStops(capabilities: ManualCapabilities): List<ManualStop<Long>> {
@@ -169,7 +180,8 @@ object ManualCameraValues {
         } else {
             standard.map { it.value }
         }
-        return values.map { ManualStop(it, formatShutter(it)) }
+        return withHardwareEndpoints(values, range.first, range.last)
+            .map { ManualStop(it, formatShutter(it)) }
     }
 
     fun focusStops(capabilities: ManualCapabilities): List<ManualStop<Float>> {
@@ -300,6 +312,18 @@ object ManualCameraValues {
         }
         return normalized
     }
+
+    /**
+     * The hardware range is authoritative: some sensors report non-standard
+     * endpoints (for example ISO 203936 or 1/64000 s) that never appear in the
+     * photographic tables above. Always surface those exact endpoints so the
+     * wheel can reach the full capability of the lens.
+     */
+    private fun <T : Comparable<T>> withHardwareEndpoints(
+        values: List<T>,
+        first: T,
+        last: T
+    ): List<T> = (values + first + last).distinct().sorted()
 
     private fun geometricStops(min: Double, max: Double): List<Long> {
         if (min <= 0.0 || max < min) return emptyList()

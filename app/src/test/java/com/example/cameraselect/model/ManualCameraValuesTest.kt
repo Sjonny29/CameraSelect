@@ -54,6 +54,33 @@ class ManualCameraValuesTest {
     }
 
     @Test
+    fun stopListsReachTheFullHardwareRangeEvenForNonStandardEndpoints() {
+        val pixel = supported.copy(
+            isoRange = 50..203936,
+            exposureRangeNs = 15_625L..1_000_000_000L
+        )
+
+        val isoStops = ManualCameraValues.isoStops(pixel)
+        assertEquals(50, isoStops.first().value)
+        assertEquals(203936, isoStops.last().value)
+        assertEquals("203936", isoStops.last().label)
+        assertEquals(isoStops.map { it.value }.distinct().sorted(), isoStops.map { it.value })
+
+        val shutterStops = ManualCameraValues.shutterStops(pixel)
+        assertEquals(15_625L, shutterStops.first().value)
+        assertEquals("1/64000", shutterStops.first().label)
+        assertEquals(1_000_000_000L, shutterStops.last().value)
+    }
+
+    @Test
+    fun fastShutterStopsAreAvailableWhenTheSensorSupportsThem() {
+        val fast = supported.copy(exposureRangeNs = 15_625L..1_000_000_000L)
+        val labels = ManualCameraValues.shutterStops(fast).map { it.label }
+
+        assertTrue(labels.containsAll(listOf("1/10000", "1/16000", "1/32000", "1/64000")))
+    }
+
+    @Test
     fun focusStopsRunFromInfinityToTheClosestFocus() {
         val stops = ManualCameraValues.focusStops(supported)
 
@@ -72,6 +99,8 @@ class ManualCameraValuesTest {
 
     @Test
     fun shutterFormattingUsesPhotographicLabels() {
+        assertEquals("1/64000", ManualCameraValues.formatShutter(15_625L))
+        assertEquals("1/32000", ManualCameraValues.formatShutter(31_250L))
         assertEquals("1/8000", ManualCameraValues.formatShutter(125_000L))
         assertEquals("1/100", ManualCameraValues.formatShutter(10_000_000L))
         assertEquals("1/3", ManualCameraValues.formatShutter(333_333_333L))

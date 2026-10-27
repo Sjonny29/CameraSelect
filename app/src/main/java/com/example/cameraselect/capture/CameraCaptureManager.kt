@@ -78,6 +78,13 @@ object CameraCaptureManager {
             ?.let { it.lower..it.upper }
         val minFocus = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
 
+        Log.d(
+            TAG,
+            "Manual caps: iso=${isoRange?.first}..${isoRange?.last} " +
+                "exposureNs=${exposureRange?.first}..${exposureRange?.last} " +
+                "manualSensor=$supportsManualSensor"
+        )
+
         return ManualCapabilities(
             supportsManualSensor = supportsManualSensor,
             isoRange = isoRange,
