@@ -144,6 +144,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         repository.setPhotoFormat(format)
     }
 
+    /**
+     * Manual exposure turns AE off, so the hardware flash cannot meter a
+     * precapture. Only the continuous torch stays available in that state.
+     */
+    fun cycleManualExposureFlashMode() {
+        val nextMode = if (_flashMode.value == FlashMode.TORCH) FlashMode.OFF else FlashMode.TORCH
+        _flashMode.value = nextMode
+        repository.setFlashMode(nextMode)
+    }
+
     fun toggleCameraEnabled(cameraId: String) {
         val current = _enabledCameraIds.value.toMutableSet()
         if (current.contains(cameraId)) {

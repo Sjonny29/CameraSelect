@@ -2,6 +2,8 @@ package com.example.cameraselect.capture
 
 import android.net.Uri
 import androidx.compose.runtime.mutableStateOf
+import com.example.cameraselect.model.ManualCameraSettings
+import com.example.cameraselect.model.ManualCapabilities
 
 class CameraCaptureController {
     var takePhotoAction: ((rotationDegrees: Int, saveRaw: Boolean, onCaptured: (Uri?, Uri?) -> Unit) -> Boolean)? = null
@@ -12,6 +14,17 @@ class CameraCaptureController {
 
     val isDarkSceneState = mutableStateOf(false)
     val isFocusLockedState = mutableStateOf(false)
+
+    /** Manual values selected in Pro mode. Lives here so they survive mode toggles. */
+    val manualSettingsState = mutableStateOf(ManualCameraSettings())
+
+    /** Manual capabilities of the lens that is currently open. */
+    val manualCapabilitiesState = mutableStateOf(ManualCapabilities.UNSUPPORTED)
+
+    /** Latest metered values, used by the AUTO readout and to lock a wheel. */
+    val liveIsoState = mutableStateOf<Int?>(null)
+    val liveShutterState = mutableStateOf<Long?>(null)
+    val liveFocusState = mutableStateOf<Float?>(null)
 
     fun takePhoto(rotationDegrees: Int, saveRaw: Boolean, onCaptured: (Uri?, Uri?) -> Unit): Boolean =
         takePhotoAction?.invoke(rotationDegrees, saveRaw, onCaptured) ?: false
