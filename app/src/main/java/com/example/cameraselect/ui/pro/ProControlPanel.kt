@@ -1,22 +1,15 @@
 package com.example.cameraselect.ui.pro
 
-import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,46 +21,52 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cameraselect.capture.CameraCaptureController
+import com.example.cameraselect.model.ExponentialScale
+import com.example.cameraselect.model.ExposureScale
 import com.example.cameraselect.model.ManualCameraSettings
 import com.example.cameraselect.model.ManualCameraValues
 import com.example.cameraselect.model.ManualCapabilities
 import com.example.cameraselect.model.ManualControlTarget
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import com.example.cameraselect.model.ManualStop
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
-private val WheelRowHeight = 36.dp
+private val RulerRowHeight = 44.dp
 
-private const val WHEEL_STIFFNESS = 700f
-private const val WHEEL_DAMPING_RATIO = 0.78f
+/** Roughly how many standard stops the ruler shows at once. */
+private const val RULER_VISIBLE_STOPS = 6f
+
+private data class ExposurePanelConfig(
+    val valueText: String,
+    val unitLabel: String,
+    val isAuto: Boolean,
+    val position: Float,
+    val majorTicks: List<RulerTick>,
+    val minorTicks: List<Float>,
+    val unitsPerScreen: Float,
+    val onPositionChanged: (Float) -> Unit,
+    val onPositionChangeFinished: (Float) -> Unit,
+)
 
 /**
- * Slim vertical Pro control panel for ISO and Shutter Speed parameters.
- * Opens on the right side of the screen as a floating overlay above the Pro dock.
+ * Slim vertical Pro control popup for ISO and Shutter Speed.
+ *
+ * Both targets use the same [ProExposureRuler], so the two popups are a matched
+ * pair: same exponential scale, rail, ticks, fixed pointer and magnetic stops.
+ * The surrounding panel (header, value card and AUTO/MANUAL toggle) is
+ * unchanged from the previous version.
  */
 @Composable
 fun ProControlPanel(
@@ -75,77 +74,149 @@ fun ProControlPanel(
     controller: CameraCaptureController,
     settings: ManualCameraSettings,
     capabilities: ManualCapabilities,
-    onStopSelected: (Int) -> Unit,
+    onIsoChanged: (Int) -> Unit,
+    onShutterChanged: (Long) -> Unit,
     onAutoToggle: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     visibleRows: Int = 5,
     rotationDegrees: Float = 0f
 ) {
+    if (target == ManualControlTarget.FOCUS) return
+
     val liveIso = controller.liveIsoState.value
     val liveShutter = controller.liveShutterState.value
-    val liveFocus = controller.liveFocusState.value
 
     val manualExposure = settings.manualExposure &&
         capabilities.supportsManualSensor &&
         settings.iso != null &&
         settings.shutterNs != null
-    val manualFocus = settings.manualFocus &&
-        capabilities.supportsManualFocus &&
-        settings.focusDioptres != null
 
-    val title: String
-    val autoLabel: String
-    val manualLabel: String
-    val isAuto: Boolean
-    val preciseValue: String
-    val unitLabel: String
-    val labels: List<String>
-    val selectedIndex: Int
+    val isoStops = remember(capabilities) { ManualCameraValues.isoStops(capabilities) }
+    val shutterStops = remember(capabilities) { ManualCameraValues.shutterStops(capabilities) }
+    val isoScale = remember(capabilities) { ExposureScale.isoScale(capabilities) }
+    val shutterScale = remember(capabilities) { ExposureScale.shutterScale(capabilities) }
 
-    when (target) {
+    val isoStopPositions = remember(isoStops, isoScale) {
+        isoScale?.let { scale -> isoStops.map { scale.positionOf(it.value.toDouble()) } }
+            ?: emptyList()
+    }
+    val shutterStopPositions = remember(shutterStops, shutterScale) {
+        shutterScale?.let { scale -> shutterStops.map { scale.positionOf(it.value.toDouble()) } }
+            ?: emptyList()
+    }
+
+    val isoMajorTicks = remember(isoStops, isoStopPositions) {
+        isoStops.zip(isoStopPositions) { stop, position -> RulerTick(position, stop.label) }
+    }
+    val shutterMajorTicks = remember(shutterStops, shutterStopPositions) {
+        shutterStops.zip(shutterStopPositions) { stop, position -> RulerTick(position, stop.label) }
+    }
+    val isoMinorTicks = remember(isoStopPositions) {
+        ExposureScale.minorTickPositions(isoStopPositions)
+    }
+    val shutterMinorTicks = remember(shutterStopPositions) {
+        ExposureScale.minorTickPositions(shutterStopPositions)
+    }
+    val isoUnitsPerScreen = remember(isoStopPositions) {
+        RULER_VISIBLE_STOPS * ExposureScale.medianStopGap(isoStopPositions)
+    }
+    val shutterUnitsPerScreen = remember(shutterStopPositions) {
+        RULER_VISIBLE_STOPS * ExposureScale.medianStopGap(shutterStopPositions)
+    }
+
+    val config: ExposurePanelConfig? = when (target) {
         ManualControlTarget.ISO -> {
-            val stops = remember(capabilities) { ManualCameraValues.isoStops(capabilities) }
+            val range = capabilities.isoRange
             val currentIso = if (manualExposure) settings.iso else (liveIso ?: settings.iso)
-            title = "ISO"
-            autoLabel = "AUTO"
-            manualLabel = "MANUAL"
-            isAuto = !manualExposure
-            preciseValue = ManualCameraValues.formatIso(currentIso)
-            unitLabel = "ISO"
-            labels = stops.map { it.label }
-            selectedIndex = ManualCameraValues.nearestIsoIndex(stops, currentIso)
+            if (range == null || isoScale == null || currentIso == null) {
+                null
+            } else {
+                ExposurePanelConfig(
+                    valueText = ManualCameraValues.formatIso(currentIso),
+                    unitLabel = "ISO",
+                    isAuto = !manualExposure,
+                    position = isoScale.positionOf(currentIso.toDouble()),
+                    majorTicks = isoMajorTicks,
+                    minorTicks = isoMinorTicks,
+                    unitsPerScreen = isoUnitsPerScreen,
+                    onPositionChanged = { position ->
+                        onIsoChanged(isoAt(position, isoStops, isoStopPositions, isoScale, range))
+                    },
+                    onPositionChangeFinished = { position ->
+                        onIsoChanged(isoAt(position, isoStops, isoStopPositions, isoScale, range))
+                    }
+                )
+            }
         }
 
         ManualControlTarget.SHUTTER -> {
-            val stops = remember(capabilities) { ManualCameraValues.shutterStops(capabilities) }
+            val range = capabilities.exposureRangeNs
             val currentShutter =
                 if (manualExposure) settings.shutterNs else (liveShutter ?: settings.shutterNs)
-            title = "SHUTTER"
-            autoLabel = "AUTO"
-            manualLabel = "MANUAL"
-            isAuto = !manualExposure
-            preciseValue = ManualCameraValues.formatShutter(currentShutter)
-            unitLabel = "SPEED"
-            labels = stops.map { it.label }
-            selectedIndex = ManualCameraValues.nearestShutterIndex(stops, currentShutter)
+            if (range == null || shutterScale == null || currentShutter == null) {
+                null
+            } else {
+                ExposurePanelConfig(
+                    valueText = ManualCameraValues.formatShutterWithUnit(currentShutter),
+                    unitLabel = "SPEED",
+                    isAuto = !manualExposure,
+                    position = shutterScale.positionOf(currentShutter.toDouble()),
+                    majorTicks = shutterMajorTicks,
+                    minorTicks = shutterMinorTicks,
+                    unitsPerScreen = shutterUnitsPerScreen,
+                    onPositionChanged = { position ->
+                        onShutterChanged(
+                            shutterAt(
+                                position,
+                                shutterStops,
+                                shutterStopPositions,
+                                shutterScale,
+                                range
+                            )
+                        )
+                    },
+                    onPositionChangeFinished = { position ->
+                        onShutterChanged(
+                            shutterAt(
+                                position,
+                                shutterStops,
+                                shutterStopPositions,
+                                shutterScale,
+                                range
+                            )
+                        )
+                    }
+                )
+            }
         }
 
-        ManualControlTarget.FOCUS -> {
-            val stops = remember(capabilities) { ManualCameraValues.focusStops(capabilities) }
-            val currentFocus =
-                if (manualFocus) settings.focusDioptres else (liveFocus ?: settings.focusDioptres)
-            title = "FOCUS"
-            autoLabel = "AF"
-            manualLabel = "MF"
-            isAuto = !manualFocus
-            preciseValue = ManualCameraValues.formatFocus(currentFocus)
-            unitLabel = "DISTANCE"
-            labels = stops.map { it.label }
-            selectedIndex = ManualCameraValues.nearestFocusIndex(stops, currentFocus)
-        }
+        ManualControlTarget.FOCUS -> null
     }
 
+    ExposurePanel(
+        title = when (target) {
+            ManualControlTarget.ISO -> "ISO"
+            ManualControlTarget.SHUTTER -> "SHUTTER SPEED"
+            ManualControlTarget.FOCUS -> "FOCUS"
+        },
+        config = config,
+        visibleRows = visibleRows,
+        onAutoToggle = onAutoToggle,
+        onClose = onClose,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun ExposurePanel(
+    title: String,
+    config: ExposurePanelConfig?,
+    visibleRows: Int,
+    onAutoToggle: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .width(120.dp)
@@ -159,7 +230,7 @@ fun ProControlPanel(
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Header Row: Title on Left | Close button on Right
+        // Header: title | close button.
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -168,9 +239,10 @@ fun ProControlPanel(
             Text(
                 text = title,
                 color = ProYellow,
-                fontSize = 11.sp,
+                fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
+                letterSpacing = 0.8.sp,
+                maxLines = 1,
                 modifier = Modifier.padding(start = 2.dp)
             )
 
@@ -193,7 +265,7 @@ fun ProControlPanel(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Selected Value Card (Compact badge, no wasted whitespace)
+        // Live value card.
         Surface(
             shape = RoundedCornerShape(6.dp),
             color = Color(0xFFEDEDED),
@@ -204,7 +276,7 @@ fun ProControlPanel(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = preciseValue,
+                    text = config?.valueText ?: "—",
                     color = Color.Black,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -212,7 +284,7 @@ fun ProControlPanel(
                     maxLines = 1
                 )
                 Text(
-                    text = unitLabel,
+                    text = config?.unitLabel ?: "",
                     color = Color.Black.copy(alpha = 0.6f),
                     fontSize = 7.sp,
                     fontWeight = FontWeight.Bold,
@@ -224,12 +296,12 @@ fun ProControlPanel(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Vertical Ruler / List
-        if (labels.isEmpty()) {
+        // The ruler itself; drag anywhere in this area.
+        if (config == null) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(WheelRowHeight * visibleRows),
+                    .height(RulerRowHeight * visibleRows),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -239,41 +311,45 @@ fun ProControlPanel(
                 )
             }
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(WheelRowHeight * visibleRows)
-            ) {
-                key(target) {
-                    MotionRuler(
-                        labels = labels,
-                        selectedIndex = selectedIndex,
-                        manual = !isAuto,
-                        visibleRows = visibleRows,
-                        onSelect = onStopSelected,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+            key(title) {
+                ProExposureRuler(
+                    position = config.position,
+                    majorTicks = config.majorTicks,
+                    minorTicks = config.minorTicks,
+                    unitsPerScreen = config.unitsPerScreen,
+                    contentDescription = "$title ruler",
+                    stateDescription = config.valueText,
+                    onPositionChange = config.onPositionChanged,
+                    onPositionChangeFinished = config.onPositionChangeFinished,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(RulerRowHeight * visibleRows)
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // AUTO / MANUAL Toggle Button at the Bottom
+        // AUTO / MANUAL pill, outlined like the reference panel.
+        val isAuto = config?.isAuto ?: false
         Surface(
             onClick = onAutoToggle,
-            shape = RoundedCornerShape(8.dp),
-            color = if (isAuto) ProYellow else Color.White.copy(alpha = 0.15f),
-            contentColor = if (isAuto) Color.Black else Color.White,
+            shape = RoundedCornerShape(14.dp),
+            color = if (isAuto) ProYellow else Color.Transparent,
+            contentColor = if (isAuto) Color.Black else ProYellow,
+            border = BorderStroke(
+                width = 1.5.dp,
+                color = ProYellow.copy(alpha = if (isAuto) 1f else 0.7f)
+            ),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp)
+                .height(30.dp)
         ) {
-            Box(
-                contentAlignment = Alignment.Center
-            ) {
+            Box(contentAlignment = Alignment.Center) {
                 Text(
-                    text = if (isAuto) autoLabel else manualLabel,
+                    // Show the action the button performs: in AUTO it switches
+                    // to manual, in MANUAL it returns to auto.
+                    text = if (isAuto) "MANUAL" else "AUTO",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp
@@ -283,152 +359,37 @@ fun ProControlPanel(
     }
 }
 
-/**
- * Vertical ruler with a fixed center band for parameter selection.
- */
-@Composable
-fun MotionRuler(
-    labels: List<String>,
-    selectedIndex: Int,
-    manual: Boolean,
-    visibleRows: Int,
-    onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    if (labels.isEmpty()) return
+private fun isoAt(
+    position: Float,
+    stops: List<ManualStop<Int>>,
+    stopPositions: List<Float>,
+    scale: ExponentialScale,
+    range: IntRange
+): Int {
+    val exact = stops.zip(stopPositions)
+        .firstOrNull { (_, stopPosition) -> abs(stopPosition - position) < 0.01f }
+    return exact?.first?.value
+        ?: scale.valueAt(position).roundToInt().coerceIn(range.first, range.last)
+}
 
-    val rowHeightPx = with(LocalDensity.current) { WheelRowHeight.toPx() }
-    val haptic = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
+private fun shutterAt(
+    position: Float,
+    stops: List<ManualStop<Long>>,
+    stopPositions: List<Float>,
+    scale: ExponentialScale,
+    range: LongRange
+): Long {
+    val exact = stops.zip(stopPositions)
+        .firstOrNull { (_, stopPosition) -> abs(stopPosition - position) < 0.01f }
+    if (exact != null) return exact.first.value
 
-    val lastIndex = labels.lastIndex
-    val maxScrollPx = lastIndex * rowHeightPx
-    val clampedSelected = selectedIndex.coerceIn(0, lastIndex)
-
-    var scrollPx by remember { mutableFloatStateOf(clampedSelected * rowHeightPx) }
-    var reportedIndex by remember { mutableIntStateOf(clampedSelected) }
-    var dragging by remember { mutableStateOf(false) }
-    var settleJob by remember { mutableStateOf<Job?>(null) }
-
-    fun report(value: Float) {
-        val index = (value / rowHeightPx).roundToInt().coerceIn(0, lastIndex)
-        if (index == reportedIndex) return
-        reportedIndex = index
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        onSelect(index)
+    val ns = scale.valueAt(position).roundToLong().coerceIn(range.first, range.last)
+    // Continuous fine-tuning does not need nanosecond churn; snapped stops
+    // above still commit their exact table value.
+    val quantized = when {
+        ns >= 1_000_000L -> (ns / 1_000L) * 1_000L
+        ns >= 100_000L -> (ns / 100L) * 100L
+        else -> ns
     }
-
-    val draggableState = rememberDraggableState { delta ->
-        scrollPx = (scrollPx - delta).coerceIn(0f, maxScrollPx)
-        report(scrollPx)
-    }
-
-    LaunchedEffect(clampedSelected, lastIndex) {
-        scrollPx = scrollPx.coerceIn(0f, maxScrollPx)
-        reportedIndex = reportedIndex.coerceIn(0, lastIndex)
-
-        if (dragging || settleJob?.isActive == true) return@LaunchedEffect
-        if (clampedSelected == reportedIndex) return@LaunchedEffect
-        reportedIndex = clampedSelected
-        animate(
-            initialValue = scrollPx,
-            targetValue = clampedSelected * rowHeightPx,
-            animationSpec = spring(dampingRatio = 1f, stiffness = 900f)
-        ) { value, _ -> scrollPx = value }
-    }
-
-    BoxWithConstraints(
-        modifier = modifier
-            .clipToBounds()
-            .draggable(
-                state = draggableState,
-                orientation = Orientation.Vertical,
-                onDragStarted = {
-                    dragging = true
-                    settleJob?.cancel()
-                    settleJob = null
-                },
-                onDragStopped = { velocity ->
-                    dragging = false
-                    val start = scrollPx
-                    val projected = (start - velocity * 0.15f).coerceIn(0f, maxScrollPx)
-                    val targetIndex = (projected / rowHeightPx).roundToInt().coerceIn(0, lastIndex)
-                    settleJob = scope.launch {
-                        animate(
-                            initialValue = start,
-                            targetValue = targetIndex * rowHeightPx,
-                            initialVelocity = -velocity,
-                            animationSpec = spring(
-                                dampingRatio = WHEEL_DAMPING_RATIO,
-                                stiffness = WHEEL_STIFFNESS
-                            )
-                        ) { value, _ ->
-                            scrollPx = value
-                            report(value)
-                        }
-                    }
-                }
-            )
-    ) {
-        val containerHeightPx = constraints.maxHeight.toFloat()
-        val topPx = containerHeightPx / 2f - rowHeightPx / 2f
-        val safeReported = reportedIndex.coerceIn(0, lastIndex)
-
-        val halfWindow = visibleRows / 2
-        val firstRendered = (safeReported - halfWindow - 3).coerceAtLeast(0)
-        val lastRendered = (safeReported + halfWindow + 3).coerceAtMost(lastIndex)
-
-        // Highlight box for currently selected row
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth()
-                .height(WheelRowHeight)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (manual) Color(0xFF383838) else Color(0xFF2E2E2E))
-        )
-
-        for (index in firstRendered..lastRendered) {
-            val isSelected = index == safeReported
-            val distance = abs(index - safeReported)
-            val alpha = when {
-                isSelected -> 1f
-                distance == 1 -> 0.45f
-                else -> 0.22f
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(WheelRowHeight)
-                    .offset {
-                        IntOffset(
-                            x = 0,
-                            y = (topPx + index * rowHeightPx - scrollPx).roundToInt()
-                        )
-                    }
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = labels[index],
-                    color = if (isSelected) Color.White else Color.White.copy(alpha = alpha),
-                    fontSize = if (isSelected) 16.sp else 13.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(if (isSelected) 12.dp else 6.dp)
-                        .background(
-                            Color.White.copy(alpha = if (isSelected) 0.85f else 0.25f),
-                            RoundedCornerShape(1.dp)
-                        )
-                )
-            }
-        }
-    }
+    return quantized.coerceIn(range.first, range.last)
 }

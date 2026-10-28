@@ -43,7 +43,7 @@ class ManualCameraValuesTest {
     }
 
     @Test
-    fun shutterStopsFallBackToThirdStopsForExoticRanges() {
+    fun shutterStopsFallBackToHardwareEndpointsForExoticRanges() {
         val exotic = supported.copy(exposureRangeNs = 1L..100L)
         val stops = ManualCameraValues.shutterStops(exotic)
 
@@ -77,7 +77,7 @@ class ManualCameraValuesTest {
         val fast = supported.copy(exposureRangeNs = 15_625L..1_000_000_000L)
         val labels = ManualCameraValues.shutterStops(fast).map { it.label }
 
-        assertTrue(labels.containsAll(listOf("1/10000", "1/16000", "1/32000", "1/64000")))
+        assertTrue(labels.containsAll(listOf("1/8000", "1/16000", "1/32000", "1/64000")))
     }
 
     @Test
@@ -107,6 +107,13 @@ class ManualCameraValuesTest {
         assertEquals("1s", ManualCameraValues.formatShutter(1_000_000_000L))
         assertEquals("3s", ManualCameraValues.formatShutter(3_000_000_000L))
         assertEquals("—", ManualCameraValues.formatShutter(null))
+    }
+
+    @Test
+    fun shutterFormattingWithUnitAddsSeconds() {
+        assertEquals("1/250s", ManualCameraValues.formatShutterWithUnit(4_000_000L))
+        assertEquals("1s", ManualCameraValues.formatShutterWithUnit(1_000_000_000L))
+        assertEquals("—", ManualCameraValues.formatShutterWithUnit(null))
     }
 
     @Test

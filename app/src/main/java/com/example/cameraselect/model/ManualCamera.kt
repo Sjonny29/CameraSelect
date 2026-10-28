@@ -3,7 +3,6 @@ package com.example.cameraselect.model
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -72,19 +71,75 @@ data class ManualStop<T>(val value: T, val label: String)
  */
 object ManualCameraValues {
 
-    private val THIRD_STOP = 2.0.pow(1.0 / 3.0)
-
-    private val ISO_TABLE = listOf(
-        25, 32, 40, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640,
-        800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000,
-        10000, 12800, 16000, 20000, 25600, 32000, 40000, 51200, 64000,
-        80000, 102400, 128000, 160000, 204800, 256000, 320000, 409600,
-        512000, 640000, 819200, 1024000
+    /**
+     * The standard photographic shutter stops, in seconds. The slider snaps to
+     * these values whenever the lens supports them.
+     */
+    private val STANDARD_SHUTTER_SECONDS = listOf(
+        1.0 / 4000,
+        1.0 / 2000,
+        1.0 / 1000,
+        1.0 / 500,
+        1.0 / 250,
+        1.0 / 125,
+        1.0 / 60,
+        1.0 / 30,
+        1.0 / 15,
+        1.0 / 8,
+        1.0 / 4,
+        1.0 / 2,
+        1.0,
+        2.0,
+        4.0,
+        8.0,
+        15.0,
+        30.0
     )
 
     /**
-     * Standard photographic shutter values, in nanoseconds. The labels are what
-     * a photographer expects to see, not raw nanosecond numbers.
+     * Full-stop ISO series, which includes the standard 100..6400 stops.
+     * Generating the whole series lets a lens whose range extends past ISO 6400
+     * keep full-stop detents all the way to its hardware limit.
+     */
+    private val ISO_SERIES: List<Int> = buildList {
+        var value = 25
+        while (value <= 2_000_000) {
+            add(value)
+            value *= 2
+        }
+    }
+
+    /**
+     * Full-stop shutter series in nanoseconds. It contains the standard list
+     * above and extends it by halving/doubling so wider hardware ranges (for
+     * example 1/64000 s or exposures longer than 30 s) keep detents.
+     */
+    private val SHUTTER_SERIES_NS: List<Long> = buildList {
+        val seconds = STANDARD_SHUTTER_SECONDS.toMutableList()
+
+        var fast = 1.0 / 4000.0
+        while (fast > 1.0 / 1_000_000.0) {
+            fast /= 2.0
+            seconds.add(fast)
+        }
+
+        var slow = 30.0
+        while (slow < 3600.0) {
+            slow *= 2.0
+            seconds.add(slow)
+        }
+
+        seconds
+            .map { (it * 1_000_000_000.0).roundToLong() }
+            .distinct()
+            .sorted()
+            .forEach { add(it) }
+    }
+
+    /**
+     * Fine-grained photographic shutter values, in nanoseconds. This table is
+     * only used to format arbitrary (non-snapped) values nicely; the slider
+     * detents come from [SHUTTER_SERIES_NS].
      */
     private val SHUTTER_TABLE: List<ManualStop<Long>> = listOf(
         "1/64000" to 1.0 / 64000,
@@ -160,28 +215,35 @@ object ManualCameraValues {
     fun isoStops(capabilities: ManualCapabilities): List<ManualStop<Int>> {
         if (!capabilities.supportsManualSensor) return emptyList()
         val range = capabilities.isoRange ?: return emptyList()
-        val standard = ISO_TABLE.filter { it in range }
-        val values: List<Int> = if (standard.isEmpty()) {
-            geometricStops(range.first.toDouble(), range.last.toDouble())
-                .map { it.toInt() }
-        } else {
-            standard
-        }
-        return withHardwareEndpoints(values, range.first, range.last)
-            .map { ManualStop(it, it.toString()) }
+        return standardIsoStops(range).map { ManualStop(it, it.toString()) }
     }
 
     fun shutterStops(capabilities: ManualCapabilities): List<ManualStop<Long>> {
         if (!capabilities.supportsManualSensor) return emptyList()
         val range = capabilities.exposureRangeNs ?: return emptyList()
-        val standard = SHUTTER_TABLE.filter { it.value in range }
-        val values: List<Long> = if (standard.isEmpty()) {
-            geometricStops(range.first.toDouble(), range.last.toDouble())
-        } else {
-            standard.map { it.value }
-        }
-        return withHardwareEndpoints(values, range.first, range.last)
-            .map { ManualStop(it, formatShutter(it)) }
+        return standardShutterStops(range).map { ManualStop(it, formatShutter(it)) }
+    }
+
+    /**
+     * Full-stop ISO detents clipped to [range], plus the exact hardware
+     * endpoints so the slider can reach (and snap to) the full lens range.
+     */
+    fun standardIsoStops(range: IntRange): List<Int> {
+        if (range.first <= 0 || range.last < range.first) return emptyList()
+        return (ISO_SERIES.filter { it in range } + range.first + range.last)
+            .distinct()
+            .sorted()
+    }
+
+    /**
+     * Full-stop shutter detents clipped to [range], plus the exact hardware
+     * endpoints so the slider can reach (and snap to) the full lens range.
+     */
+    fun standardShutterStops(range: LongRange): List<Long> {
+        if (range.first <= 0L || range.last < range.first) return emptyList()
+        return (SHUTTER_SERIES_NS.filter { it in range } + range.first + range.last)
+            .distinct()
+            .sorted()
     }
 
     fun focusStops(capabilities: ManualCapabilities): List<ManualStop<Float>> {
@@ -230,6 +292,16 @@ object ManualCameraValues {
         } else {
             "1/${(1.0 / seconds).roundToInt()}"
         }
+    }
+
+    /**
+     * Same as [formatShutter] but always carries the seconds unit, so the Pro
+     * slider reads "1/250s" rather than "1/250". Long exposures already end in
+     * "s" and are returned unchanged.
+     */
+    fun formatShutterWithUnit(exposureNs: Long?): String {
+        val label = formatShutter(exposureNs)
+        return if (label == "—" || label.endsWith("s")) label else "${label}s"
     }
 
     fun formatFocus(dioptres: Float?): String {
@@ -311,33 +383,6 @@ object ManualCameraValues {
             }
         }
         return normalized
-    }
-
-    /**
-     * The hardware range is authoritative: some sensors report non-standard
-     * endpoints (for example ISO 203936 or 1/64000 s) that never appear in the
-     * photographic tables above. Always surface those exact endpoints so the
-     * wheel can reach the full capability of the lens.
-     */
-    private fun <T : Comparable<T>> withHardwareEndpoints(
-        values: List<T>,
-        first: T,
-        last: T
-    ): List<T> = (values + first + last).distinct().sorted()
-
-    private fun geometricStops(min: Double, max: Double): List<Long> {
-        if (min <= 0.0 || max < min) return emptyList()
-
-        val values = mutableListOf<Long>()
-        var value = min
-        var guard = 0
-        while (value < max && guard < 512) {
-            values.add(value.roundToLong())
-            value *= THIRD_STOP
-            guard++
-        }
-        values.add(max.roundToLong())
-        return values.distinct().sorted()
     }
 
     private fun formatSeconds(seconds: Double): String {

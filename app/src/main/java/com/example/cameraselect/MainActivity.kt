@@ -896,70 +896,47 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     settings = manualSettings,
                     capabilities = manualCapabilities,
                     visibleRows = proVisibleRows,
-                    onStopSelected = { index ->
+                    onIsoChanged = { iso ->
                         val current = captureController.manualSettingsState.value
-                        when (openProControl) {
-                            ManualControlTarget.ISO -> {
-                                ManualCameraValues.isoStops(manualCapabilities)
-                                    .getOrNull(index)
-                                    ?.let { stop ->
-                                        val base = if (current.manualExposure) {
-                                            current
-                                        } else {
-                                            ManualCameraValues.lockExposure(
-                                                current,
-                                                manualCapabilities,
-                                                captureController.liveIsoState.value,
-                                                captureController.liveShutterState.value
-                                            )
-                                        }
-                                        captureController.manualSettingsState.value =
-                                            base.withIso(stop.value)
-                                    }
-                            }
-
-                            ManualControlTarget.SHUTTER -> {
-                                ManualCameraValues.shutterStops(manualCapabilities)
-                                    .getOrNull(index)
-                                    ?.let { stop ->
-                                        val base = if (current.manualExposure) {
-                                            current
-                                        } else {
-                                            ManualCameraValues.lockExposure(
-                                                current,
-                                                manualCapabilities,
-                                                captureController.liveIsoState.value,
-                                                captureController.liveShutterState.value
-                                            )
-                                        }
-                                        captureController.manualSettingsState.value =
-                                            base.withShutter(stop.value)
-                                    }
-                            }
-
-                            else -> Unit
+                        val base = if (current.manualExposure) {
+                            current
+                        } else {
+                            ManualCameraValues.lockExposure(
+                                current,
+                                manualCapabilities,
+                                captureController.liveIsoState.value,
+                                captureController.liveShutterState.value
+                            )
                         }
+                        captureController.manualSettingsState.value = base.withIso(iso)
+                    },
+                    onShutterChanged = { shutterNs ->
+                        val current = captureController.manualSettingsState.value
+                        val base = if (current.manualExposure) {
+                            current
+                        } else {
+                            ManualCameraValues.lockExposure(
+                                current,
+                                manualCapabilities,
+                                captureController.liveIsoState.value,
+                                captureController.liveShutterState.value
+                            )
+                        }
+                        captureController.manualSettingsState.value = base.withShutter(shutterNs)
                     },
                     onAutoToggle = {
                         val current = captureController.manualSettingsState.value
-                        when (openProControl) {
-                            ManualControlTarget.ISO,
-                            ManualControlTarget.SHUTTER -> {
-                                captureController.manualSettingsState.value =
-                                    if (current.manualExposure) {
-                                        current.copy(manualExposure = false)
-                                    } else {
-                                        ManualCameraValues.lockExposure(
-                                            current,
-                                            manualCapabilities,
-                                            captureController.liveIsoState.value,
-                                            captureController.liveShutterState.value
-                                        )
-                                    }
+                        captureController.manualSettingsState.value =
+                            if (current.manualExposure) {
+                                current.copy(manualExposure = false)
+                            } else {
+                                ManualCameraValues.lockExposure(
+                                    current,
+                                    manualCapabilities,
+                                    captureController.liveIsoState.value,
+                                    captureController.liveShutterState.value
+                                )
                             }
-
-                            else -> Unit
-                        }
                     },
                     onClose = { openProControl = null }
                 )
