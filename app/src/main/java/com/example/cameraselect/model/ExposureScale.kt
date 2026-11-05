@@ -1,6 +1,5 @@
 package com.example.cameraselect.model
 
-import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -37,28 +36,13 @@ class ExponentialScale(val min: Double, val max: Double) {
 }
 
 /**
- * Shared 0..100 scale and magnetic-stop helpers for the ISO and shutter
- * sliders. Deliberately Android-free so the mapping can be unit tested.
+ * Shared 0..100 scale helpers for the ISO and shutter sliders. Deliberately
+ * Android-free so the mapping can be unit tested.
  */
 object ExposureScale {
 
     const val MIN_POSITION = 0f
     const val MAX_POSITION = 100f
-
-    /**
-     * Hard cap for the magnetic window, in slider units. Snapping is meant to
-     * happen only when the pointer is already very close to a stop, so the rest
-     * of the scale stays free for fine values.
-     */
-    const val SNAP_THRESHOLD = 1.8f
-
-    /**
-     * The magnetic window is a small fraction of the local stop spacing. For
-     * the standard shutter scale that is roughly a fifth of a stop; for the
-     * wider ISO scale the [SNAP_THRESHOLD] cap keeps it even tighter.
-     */
-    private const val SNAP_WINDOW_FRACTION = 0.18f
-    private const val MAGNETIC_STRENGTH = 0.65f
 
     fun isoScale(capabilities: ManualCapabilities): ExponentialScale? {
         if (!capabilities.supportsManualSensor) return null
@@ -94,14 +78,11 @@ object ExposureScale {
             .roundToLong()
             .coerceIn(range.first, range.last)
 
-    fun nearestStop(position: Float, stopPositions: List<Float>): Float? =
-        stopPositions.minByOrNull { abs(it - position) }
-
     /**
      * Short guide ticks between the standard stops. [subdivisions] equal parts
      * are inserted into every gap, so the default of three gives two visual
-     * third-stop ticks between each pair. They are guides only and are never
-     * used as snap targets.
+     * third-stop ticks between each pair. They are guides only: the ruler never
+     * forces the pointer onto them.
      */
     fun minorTickPositions(
         stopPositions: List<Float>,
@@ -141,58 +122,6 @@ object ExposureScale {
             (gaps[middle - 1] + gaps[middle]) / 2f
         } else {
             gaps[middle]
-        }
-    }
-
-    /**
-     * Half-width of the magnetic window around [position]'s nearest stop. It is
-     * a small fraction of the local stop spacing, capped so that only a very
-     * deliberate approach settles onto a stop.
-     */
-    fun snapWindow(position: Float, stopPositions: List<Float>): Float {
-        if (stopPositions.isEmpty()) return 0f
-
-        val sorted = stopPositions.sorted()
-        val index = sorted.indices.minByOrNull { abs(sorted[it] - position) } ?: return 0f
-        val gap = when {
-            sorted.size == 1 -> MAX_POSITION
-            index == 0 -> sorted[1] - sorted[0]
-            index == sorted.lastIndex -> sorted[index] - sorted[index - 1]
-            else -> minOf(
-                sorted[index] - sorted[index - 1],
-                sorted[index + 1] - sorted[index]
-            )
-        }
-        return minOf(SNAP_THRESHOLD, gap * SNAP_WINDOW_FRACTION)
-    }
-
-    /**
-     * Smooth, bounded pull toward the nearest stop. The thumb still follows the
-     * finger continuously; this only bends its path near a detent.
-     */
-    fun magneticPosition(position: Float, stopPositions: List<Float>): Float {
-        val nearest = nearestStop(position, stopPositions) ?: return position
-        val window = snapWindow(position, stopPositions)
-        if (window <= 0f) return position
-
-        val distance = abs(nearest - position)
-        if (distance >= window) return position
-
-        val t = 1f - distance / window
-        val eased = t * t * (3f - 2f * t)
-        return position + (nearest - position) * MAGNETIC_STRENGTH * eased
-    }
-
-    /**
-     * Exact stop to use when the finger lifts, or [position] unchanged when the
-     * user deliberately moved into the fine-tuning gap between stops.
-     */
-    fun settlePosition(position: Float, stopPositions: List<Float>): Float {
-        val nearest = nearestStop(position, stopPositions) ?: return position
-        return if (abs(nearest - position) <= snapWindow(position, stopPositions)) {
-            nearest
-        } else {
-            position
         }
     }
 }

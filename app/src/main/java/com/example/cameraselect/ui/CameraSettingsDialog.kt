@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -29,6 +31,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -45,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.LensFacing
+import com.example.cameraselect.model.VideoStandard
 import com.example.cameraselect.ui.theme.CameraSelectTheme
 
 private fun Modifier.drawScrollbar(
@@ -79,9 +86,11 @@ fun CameraSettingsDialog(
     showHidden: Boolean,
     isMirrored: Boolean,
     noCrop: Boolean,
+    videoStandard: VideoStandard,
     onToggleShowHidden: () -> Unit,
     onToggleIsMirrored: () -> Unit,
     onToggleNoCrop: () -> Unit,
+    onVideoStandardChange: (VideoStandard) -> Unit,
     onToggleCameraEnabled: (String) -> Unit,
     onDismissRequest: () -> Unit,
     rotationAngle: Float = 0f
@@ -212,7 +221,14 @@ fun CameraSettingsDialog(
                         isLandscape = isLandscape
                     )
 
-                    // 5. Hidden Lenses List (Shown when showHidden is true)
+                    // 5. Region (PAL / NTSC) selector
+                    RegionSettingRow(
+                        current = videoStandard,
+                        onStandardSelected = onVideoStandardChange,
+                        isLandscape = isLandscape
+                    )
+
+                    // 6. Hidden Lenses List (Shown when showHidden is true)
                     if (showHidden) {
                         Spacer(modifier = Modifier.height(if (isLandscape) 4.dp else 8.dp))
                         if (hiddenCameras.isNotEmpty()) {
@@ -273,6 +289,108 @@ private fun SettingToggleRow(
 }
 
 @Composable
+private fun RegionSettingRow(
+    current: VideoStandard,
+    onStandardSelected: (VideoStandard) -> Unit,
+    isLandscape: Boolean
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = if (isLandscape) 4.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Region",
+                fontSize = if (isLandscape) 16.sp else 20.sp,
+                fontWeight = FontWeight.Normal,
+                color = Color.Black
+            )
+
+            Surface(
+                onClick = { expanded = !expanded },
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFFF0F0F0),
+                contentColor = Color.Black
+            ) {
+                Row(
+                    modifier = Modifier.padding(
+                        start = 12.dp,
+                        end = 6.dp,
+                        top = 6.dp,
+                        bottom = 6.dp
+                    ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = current.label,
+                        fontSize = if (isLandscape) 14.sp else 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "Change region",
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+
+        // Inline drop-down instead of a Popup-based menu: the whole dialog card
+        // rotates in landscape, and a Popup would not follow that rotation.
+        if (expanded) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFF7F7F7),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    for (standard in VideoStandard.entries) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onStandardSelected(standard)
+                                    expanded = false
+                                }
+                                .padding(
+                                    horizontal = 12.dp,
+                                    vertical = if (isLandscape) 8.dp else 10.dp
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = standard.label,
+                                fontSize = if (isLandscape) 14.sp else 16.sp,
+                                fontWeight = if (standard == current) {
+                                    FontWeight.Bold
+                                } else {
+                                    FontWeight.Normal
+                                },
+                                color = Color.Black
+                            )
+                            if (standard == current) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = Color(0xFF38ACFA),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CameraSettingItem(
     camera: CameraLensInfo,
     isChecked: Boolean,
@@ -326,9 +444,11 @@ fun FrontCameraSettingsDialogPreview() {
             showHidden = true,
             isMirrored = true,
             noCrop = false,
+            videoStandard = VideoStandard.NTSC,
             onToggleShowHidden = {},
             onToggleIsMirrored = {},
             onToggleNoCrop = {},
+            onVideoStandardChange = {},
             onToggleCameraEnabled = {},
             onDismissRequest = {}
         )
@@ -377,9 +497,11 @@ fun RearCameraSettingsDialogPreview() {
             showHidden = true,
             isMirrored = false,
             noCrop = false,
+            videoStandard = VideoStandard.NTSC,
             onToggleShowHidden = {},
             onToggleIsMirrored = {},
             onToggleNoCrop = {},
+            onVideoStandardChange = {},
             onToggleCameraEnabled = {},
             onDismissRequest = {}
         )

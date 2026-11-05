@@ -64,7 +64,8 @@ private data class ExposurePanelConfig(
  * Slim vertical Pro control popup for ISO and Shutter Speed.
  *
  * Both targets use the same [ProExposureRuler], so the two popups are a matched
- * pair: same exponential scale, rail, ticks, fixed pointer and magnetic stops.
+ * pair: same exponential scale, rail, ticks and fixed pointer. The position is
+ * continuous, so fine values between the labelled stops can be set exactly.
  * The surrounding panel (header, value card and AUTO/MANUAL toggle) is
  * unchanged from the previous version.
  */
@@ -384,8 +385,8 @@ private fun shutterAt(
     if (exact != null) return exact.first.value
 
     val ns = scale.valueAt(position).roundToLong().coerceIn(range.first, range.last)
-    // Continuous fine-tuning does not need nanosecond churn; snapped stops
-    // above still commit their exact table value.
+    // Continuous fine-tuning does not need nanosecond churn; exact standard
+    // stops above still commit their table value.
     val quantized = when {
         ns >= 1_000_000L -> (ns / 1_000L) * 1_000L
         ns >= 100_000L -> (ns / 100L) * 100L
