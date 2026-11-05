@@ -62,7 +62,6 @@ private val ArrowNotch = 8.dp
 private val ArrowShaftHalfHeight = 3.dp
 
 private const val EMIT_INTERVAL_MS = 33L
-private const val SETTLE_DURATION_MS = 140
 private const val FLING_DURATION_MS = 450
 private const val FLING_PROJECTION_SECONDS = 0.25f
 
@@ -71,10 +70,11 @@ private const val FLING_PROJECTION_SECONDS = 0.25f
  *
  * The scale moves under a fixed pointer: dragging up increases the value
  * (longer shutter / higher ISO), exactly like dragging the ruler itself. The
- * finger position is free between stops; a magnetic pull only appears when the
- * pointer is already very close to a standard stop, and releasing inside that
- * narrow window settles onto the stop. Minor ticks are visual third-stop guides
- * and are never snap targets.
+ * position is continuous and never pulled toward a stop, so any value in the
+ * hardware range can be dialled in precisely. Major ticks are labels only and
+ * minor ticks are visual third-stop guides; neither is a snap target. A light
+ * haptic tick fires as the pointer crosses a labelled stop so the standard
+ * values are still easy to find by feel.
  */
 @Composable
 fun ProExposureRuler(
@@ -110,18 +110,16 @@ fun ProExposureRuler(
     var rawPosition by remember { mutableFloatStateOf(position) }
     var displayPosition by remember { mutableFloatStateOf(position) }
     var dragging by remember { mutableStateOf(false) }
-    var settling by remember { mutableStateOf(false) }
-    var lastHapticStop by remember { mutableStateOf<Float?>(null) }
+    var animating by remember { mutableStateOf(false) }
     var lastEmitMs by remember { mutableLongStateOf(0L) }
     var motionJob by remember { mutableStateOf<Job?>(null) }
 
     // External values (live metering in AUTO, or a committed manual value) only
     // move the scale while the user is not touching or flinging it.
-    LaunchedEffect(position, dragging, settling) {
-        if (!dragging && !settling) {
+    LaunchedEffect(position, dragging, animating) {
+        if (!dragging && !animating) {
             rawPosition = position
             displayPosition = position
-            lastHapticStop = null
         }
     }
 
@@ -132,19 +130,15 @@ fun ProExposureRuler(
         currentOnPositionChange(value)
     }
 
-    fun hapticTick(stop: Float) {
-        lastHapticStop = stop
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    }
-
-    fun hapticIfNeeded(raw: Float) {
-        val nearest = ExposureScale.nearestStop(raw, stopPositions) ?: return
-        val inside = abs(nearest - raw) <= ExposureScale.snapWindow(raw, stopPositions)
-
-        if (inside && lastHapticStop != nearest) {
-            hapticTick(nearest)
-        } else if (!inside && lastHapticStop == nearest) {
-            lastHapticStop = null
+    fun hapticIfCrossed(from: Float, to: Float) {
+        if (from == to) return
+        val crossed = if (to > from) {
+            stopPositions.any { it > from && it <= to }
+        } else {
+            stopPositions.any { it < from && it >= to }
+        }
+        if (crossed) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
 
@@ -154,45 +148,13 @@ fun ProExposureRuler(
         currentOnPositionChangeFinished(value)
     }
 
-    suspend fun animateDisplayTo(target: Float) {
-        val start = displayPosition
-        if (abs(target - start) >= 0.01f) {
-            animate(
-                initialValue = start,
-                targetValue = target,
-                animationSpec = tween(durationMillis = SETTLE_DURATION_MS)
-            ) { value, _ ->
-                displayPosition = value
-            }
-        }
-        displayPosition = target
-    }
-
-    fun hapticOnSettle(target: Float) {
-        val nearest = ExposureScale.nearestStop(target, stopPositions) ?: return
-        if (abs(nearest - target) < 0.01f && lastHapticStop != nearest) {
-            hapticTick(nearest)
-        }
-    }
-
-    fun settleTo(target: Float) {
-        motionJob?.cancel()
-        settling = true
-        motionJob = scope.launch {
-            commit(target)
-            animateDisplayTo(target)
-            settling = false
-            hapticOnSettle(target)
-        }
-    }
-
     fun fling(velocityPxPerSecond: Float, pxPerUnit: Float) {
         val unitsPerSecond = -velocityPxPerSecond / pxPerUnit
         val projected = (rawPosition + unitsPerSecond * FLING_PROJECTION_SECONDS)
             .coerceIn(ExposureScale.MIN_POSITION, ExposureScale.MAX_POSITION)
 
         motionJob?.cancel()
-        settling = true
+        animating = true
         motionJob = scope.launch {
             if (abs(projected - rawPosition) >= 0.01f) {
                 animate(
@@ -209,11 +171,8 @@ fun ProExposureRuler(
                 }
             }
 
-            val target = ExposureScale.settlePosition(projected, stopPositions)
-            commit(target)
-            animateDisplayTo(target)
-            settling = false
-            hapticOnSettle(target)
+            commit(projected)
+            animating = false
         }
     }
 
@@ -227,7 +186,7 @@ fun ProExposureRuler(
                 setProgress { target ->
                     val clamped = target.coerceIn(0f, 100f)
                     motionJob?.cancel()
-                    settling = false
+                    animating = false
                     displayPosition = clamped
                     commit(clamped)
                     true
@@ -239,13 +198,12 @@ fun ProExposureRuler(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
 
-                    // Only stop an in-flight settle/fling once a new touch
-                    // starts, so the release animation is not aborted.
+                    // Only stop an in-flight fling once a new touch starts, so
+                    // the release animation is not aborted.
                     motionJob?.cancel()
-                    settling = false
+                    animating = false
                     dragging = true
                     rawPosition = displayPosition
-                    lastHapticStop = null
 
                     val heightPx = size.height.toFloat().coerceAtLeast(1f)
                     val pxPerUnit = (heightPx / unitsPerScreen.coerceAtLeast(0.001f))
@@ -265,9 +223,7 @@ fun ProExposureRuler(
                                 if (abs(velocity) > heightPx * 1.5f) {
                                     fling(velocity, pxPerUnit)
                                 } else {
-                                    settleTo(
-                                        ExposureScale.settlePosition(rawPosition, stopPositions)
-                                    )
+                                    commit(rawPosition)
                                 }
                                 break
                             }
@@ -275,14 +231,12 @@ fun ProExposureRuler(
                             if (change.positionChanged()) {
                                 velocityTracker.addPosition(change.uptimeMillis, change.position)
                                 val deltaY = change.positionChange().y
+                                val previous = rawPosition
                                 rawPosition = (rawPosition - deltaY / pxPerUnit)
                                     .coerceIn(ExposureScale.MIN_POSITION, ExposureScale.MAX_POSITION)
-                                displayPosition = ExposureScale.magneticPosition(
-                                    rawPosition,
-                                    stopPositions
-                                )
+                                displayPosition = rawPosition
                                 emit(displayPosition, force = false)
-                                hapticIfNeeded(rawPosition)
+                                hapticIfCrossed(previous, rawPosition)
                                 change.consume()
                             }
                         }

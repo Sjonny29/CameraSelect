@@ -72,8 +72,8 @@ data class ManualStop<T>(val value: T, val label: String)
 object ManualCameraValues {
 
     /**
-     * The standard photographic shutter stops, in seconds. The slider snaps to
-     * these values whenever the lens supports them.
+     * The standard photographic shutter stops, in seconds. The ruler labels
+     * them, but the selected value is never forced onto them.
      */
     private val STANDARD_SHUTTER_SECONDS = listOf(
         1.0 / 4000,
@@ -138,8 +138,8 @@ object ManualCameraValues {
 
     /**
      * Fine-grained photographic shutter values, in nanoseconds. This table is
-     * only used to format arbitrary (non-snapped) values nicely; the slider
-     * detents come from [SHUTTER_SERIES_NS].
+     * only used to format arbitrary values nicely; the labelled ruler stops
+     * come from [SHUTTER_SERIES_NS].
      */
     private val SHUTTER_TABLE: List<ManualStop<Long>> = listOf(
         "1/64000" to 1.0 / 64000,
@@ -225,8 +225,8 @@ object ManualCameraValues {
     }
 
     /**
-     * Full-stop ISO detents clipped to [range], plus the exact hardware
-     * endpoints so the slider can reach (and snap to) the full lens range.
+     * Full-stop ISO series clipped to [range], plus the exact hardware
+     * endpoints so the labelled ruler can reach the full lens range.
      */
     fun standardIsoStops(range: IntRange): List<Int> {
         if (range.first <= 0 || range.last < range.first) return emptyList()
@@ -236,8 +236,8 @@ object ManualCameraValues {
     }
 
     /**
-     * Full-stop shutter detents clipped to [range], plus the exact hardware
-     * endpoints so the slider can reach (and snap to) the full lens range.
+     * Full-stop shutter series clipped to [range], plus the exact hardware
+     * endpoints so the labelled ruler can reach the full lens range.
      */
     fun standardShutterStops(range: LongRange): List<Long> {
         if (range.first <= 0L || range.last < range.first) return emptyList()

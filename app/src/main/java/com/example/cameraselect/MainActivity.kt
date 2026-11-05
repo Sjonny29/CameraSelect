@@ -39,6 +39,7 @@ import android.view.TextureView
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.Animatable
@@ -78,9 +79,11 @@ import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.FlashAuto
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
@@ -115,6 +118,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
@@ -133,6 +137,7 @@ import com.example.cameraselect.capture.FlashAeMode
 import com.example.cameraselect.capture.FlashDecisionReason
 import com.example.cameraselect.capture.FlashLampMode
 import com.example.cameraselect.capture.RearFlashPlanner
+import com.example.cameraselect.capture.VideoRatePlan
 import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.CaptureMode
 import com.example.cameraselect.model.LensFacing
@@ -141,6 +146,7 @@ import com.example.cameraselect.model.ManualCameraValues
 import com.example.cameraselect.model.ManualCapabilities
 import com.example.cameraselect.model.ManualControlTarget
 import com.example.cameraselect.model.PhotoFormat
+import com.example.cameraselect.model.VideoStandard
 import com.example.cameraselect.ui.CameraSettingsDialog
 import com.example.cameraselect.ui.pro.ProCameraDock
 import com.example.cameraselect.ui.pro.ProControlPanel
@@ -330,6 +336,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
 
     val flashMode by viewModel.flashMode.collectAsStateWithLifecycle()
     val photoFormat by viewModel.photoFormat.collectAsStateWithLifecycle()
+    val videoStandard by viewModel.videoStandard.collectAsStateWithLifecycle()
 
     val captureMode by viewModel.captureMode.collectAsStateWithLifecycle()
     val isRecording by viewModel.isRecording.collectAsStateWithLifecycle()
@@ -352,7 +359,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val manualSettings = captureController.manualSettingsState.value
     val manualCapabilities = captureController.manualCapabilitiesState.value
     var openProControl by remember { mutableStateOf<ManualControlTarget?>(null) }
-    val isProMode = captureMode == CaptureMode.PRO_PHOTO
+    val isProMode = captureMode.isPro
     val isManualExposureActive = isProMode &&
         manualSettings.manualExposure &&
         manualCapabilities.supportsManualSensor &&
@@ -368,10 +375,16 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     // The flash toggle reflects what the sensor can actually do: AE OFF rules
     // out AUTO/ON flash, while the continuous torch stays available.
     val displayedFlashMode = if (isManualExposureActive) effectiveFlashMode else flashMode
-    val proVisibleRows = if (context.resources.configuration.screenHeightDp < 700) 4 else 5
+    val configuration = LocalConfiguration.current
+    val proVisibleRows = if (configuration.screenHeightDp < 700) 4 else 5
+
+    // Back closes the top-most overlay instead of leaving the camera screen.
+    // Registered in reverse priority order: the settings overlay is on top.
+    BackHandler(enabled = openProControl != null) { openProControl = null }
+    BackHandler(enabled = isSettingsOpen) { viewModel.setSettingsOpen(false) }
 
     LaunchedEffect(captureMode) {
-        if (captureMode != CaptureMode.PRO_PHOTO) openProControl = null
+        if (!captureMode.isPro) openProControl = null
     }
 
     // A wide pill rotated sideways needs extra headroom so it never sits under the status bar.
@@ -529,6 +542,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val onStartRecording: () -> Unit = {
         captureController.startRecording(
             rotationDegrees = buttonRotation.toInt(),
+            standard = videoStandard,
             onStarted = {
                 mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
                 viewModel.setIsRecording(true)
@@ -604,7 +618,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 flashMode = flashMode,
                 deviceRotationDegrees = buttonRotation.toInt(),
                 captureRaw = isRawCaptureEnabled,
-                isVideoMode = captureMode == CaptureMode.VIDEO,
+                isVideoMode = captureMode.isVideo,
                 isProMode = isProMode,
                 manualSettings = manualSettings,
                 captureController = captureController,
@@ -647,54 +661,77 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             )
         }
 
-        // 5. Top-Left Flash Toggle Icon
-        IconButton(
-            onClick = {
-                if (isManualExposureActive) {
-                    viewModel.cycleManualExposureFlashMode()
-                } else {
-                    viewModel.cycleFlashMode()
-                }
-            },
+        // 5. Top-Left Flash Toggle and (in Pro mode) the photo/video toggle
+        Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(top = topControlsPadding, start = 16.dp)
-                .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                .size(56.dp)
-                .rotate(buttonRotation)
+                .padding(top = topControlsPadding, start = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            when (displayedFlashMode) {
-                FlashMode.AUTO -> {
-                    Icon(
-                        imageVector = Icons.Default.FlashAuto,
-                        contentDescription = "Flash Auto",
-                        tint = Color.White,
-                        modifier = Modifier.size(44.dp)
-                    )
+            IconButton(
+                onClick = {
+                    if (isManualExposureActive) {
+                        viewModel.cycleManualExposureFlashMode()
+                    } else {
+                        viewModel.cycleFlashMode()
+                    }
+                },
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                    .size(56.dp)
+                    .rotate(buttonRotation)
+            ) {
+                when (displayedFlashMode) {
+                    FlashMode.AUTO -> {
+                        Icon(
+                            imageVector = Icons.Default.FlashAuto,
+                            contentDescription = "Flash Auto",
+                            tint = Color.White,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                    FlashMode.OFF -> {
+                        FlashOffCustomIcon(
+                            isRecording = false,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                    FlashMode.ON -> {
+                        Icon(
+                            imageVector = Icons.Default.FlashOn,
+                            contentDescription = "Flash On",
+                            tint = Color.White,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                    FlashMode.TORCH -> {
+                        Icon(
+                            imageVector = Icons.Default.Lightbulb,
+                            contentDescription = "Torch Light",
+                            tint = Color.White,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
                 }
-                FlashMode.OFF -> {
-                    FlashOffCustomIcon(
-                        isRecording = false,
-                        modifier = Modifier.size(44.dp)
-                    )
-                }
-                FlashMode.ON -> {
-                    Icon(
-                        imageVector = Icons.Default.FlashOn,
-                        contentDescription = "Flash On",
-                        tint = Color.White,
-                        modifier = Modifier.size(44.dp)
-                    )
-                }
-                FlashMode.TORCH -> {
-                    Icon(
-                        imageVector = Icons.Default.Lightbulb,
-                        contentDescription = "Torch Light",
-                        tint = Color.White,
-                        modifier = Modifier.size(44.dp)
-                    )
-                }
+            }
+
+            // Hidden while recording so the timer at the top centre stays clear.
+            if (isProMode && !isRecording) {
+                ProCaptureModeToggle(
+                    isVideo = captureMode.isVideo,
+                    onToggle = {
+                        viewModel.setCaptureMode(
+                            if (captureMode.isVideo) {
+                                CaptureMode.PRO_PHOTO
+                            } else {
+                                CaptureMode.PRO_VIDEO
+                            }
+                        )
+                    },
+                    modifier = Modifier.rotate(buttonRotation)
+                )
             }
         }
 
@@ -952,12 +989,43 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 showHidden = currentFacingShowHidden,
                 isMirrored = currentFacingIsMirrored,
                 noCrop = currentFacingNoCrop,
+                videoStandard = videoStandard,
                 onToggleShowHidden = { viewModel.toggleShowHidden(activeFacing) },
                 onToggleIsMirrored = { viewModel.toggleIsMirrored(activeFacing) },
                 onToggleNoCrop = { viewModel.toggleNoCrop(activeFacing) },
+                onVideoStandardChange = { viewModel.setVideoStandard(it) },
                 onToggleCameraEnabled = { id -> viewModel.toggleCameraEnabled(id) },
                 onDismissRequest = { viewModel.setSettingsOpen(false) },
                 rotationAngle = buttonRotation
+            )
+        }
+    }
+}
+
+@Composable
+fun ProCaptureModeToggle(
+    isVideo: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onToggle,
+        shape = CircleShape,
+        color = Color.Black.copy(alpha = 0.45f),
+        contentColor = Color.White,
+        modifier = modifier.size(56.dp)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            // Shows the mode the button switches TO: a camcorder while in
+            // photo mode, a camera while in video mode.
+            Icon(
+                imageVector = if (isVideo) Icons.Default.PhotoCamera else Icons.Default.Videocam,
+                contentDescription = if (isVideo) "Switch to photo mode" else "Switch to video mode",
+                tint = Color(0xFFFFD700),
+                modifier = Modifier.size(30.dp)
             )
         }
     }
@@ -990,8 +1058,10 @@ fun CaptureModeSelector(
             )
             CaptureModeItem(
                 title = "PRO",
-                isSelected = currentMode == CaptureMode.PRO_PHOTO,
-                onClick = { onModeSelected(CaptureMode.PRO_PHOTO) }
+                isSelected = currentMode.isPro,
+                onClick = {
+                    if (!currentMode.isPro) onModeSelected(CaptureMode.PRO_PHOTO)
+                }
             )
         }
     }
@@ -1107,7 +1177,7 @@ fun CaptureShutterButton(
                 )
             }
         }
-        CaptureMode.VIDEO -> {
+        CaptureMode.VIDEO, CaptureMode.PRO_VIDEO -> {
             if (!isRecording) {
                 Box(
                     modifier = modifier
@@ -2537,6 +2607,7 @@ private class CameraSessionHolder {
 
     fun startRecording(
         deviceRotationDegrees: Int,
+        standard: VideoStandard,
         onStarted: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -2558,7 +2629,15 @@ private class CameraSessionHolder {
         val (videoUri, pfd) = videoUriPair
 
         val videoSize = CameraCaptureManager.chooseOptimalVideoSize(chars)
-        val recorder = CameraCaptureManager.prepareMediaRecorder(ctx, pfd, chars, videoSize, deviceRotationDegrees)
+        val ratePlan = CameraCaptureManager.resolveVideoRatePlan(chars, videoSize, standard)
+        val recorder = CameraCaptureManager.prepareMediaRecorder(
+            ctx,
+            pfd,
+            chars,
+            videoSize,
+            deviceRotationDegrees,
+            frameRate = ratePlan.framesPerSecond
+        )
         if (recorder == null) {
             try { pfd.close() } catch (_: Exception) {}
             CameraCaptureManager.discardVideo(ctx, videoUri)
@@ -2599,19 +2678,9 @@ private class CameraSessionHolder {
                             if (supportsAutoFocus && !isTapFocusActive) {
                                 previewAfMode = videoAfMode
                             }
-                            applyFocusMetering(recordBuilder)
 
-                            val shouldTorch = hasFlash && flashMode == FlashMode.TORCH
-
-                            if (shouldTorch) {
-                                recordBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                                recordBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
-                                isTorchOnDuringRecording = true
-                            } else {
-                                recordBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                                recordBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                                isTorchOnDuringRecording = false
-                            }
+                            isTorchOnDuringRecording = hasFlash && flashMode == FlashMode.TORCH
+                            applyVideoRequestSettings(recordBuilder, ratePlan, standard)
 
                             newSession.setRepeatingRequest(
                                 recordBuilder.build(),
@@ -2643,6 +2712,88 @@ private class CameraSessionHolder {
             onError("Failed to start video: ${e.message}")
             cleanUpFailedRecording()
             restartPreviewSession()
+        }
+    }
+
+    /**
+     * Applies Pro manual exposure/focus plus the selected broadcast standard to
+     * the recording request. Auto exposure uses CONTROL_AE_TARGET_FPS_RANGE;
+     * manual exposure paces frames with SENSOR_FRAME_DURATION instead.
+     */
+    fun applyVideoRequestSettings(
+        builder: CaptureRequest.Builder,
+        ratePlan: VideoRatePlan,
+        standard: VideoStandard
+    ) {
+        val torch = hasFlash && flashMode == FlashMode.TORCH
+
+        if (isManualExposureActive()) {
+            val iso = manualCapabilities.isoRange?.let {
+                (manualSettings.iso ?: 100).coerceIn(it)
+            } ?: (manualSettings.iso ?: 100)
+            val requestedExposure = manualSettings.shutterNs ?: 33_333_333L
+            val exposureNs = manualCapabilities.exposureRangeNs?.let {
+                requestedExposure.coerceIn(it)
+            } ?: requestedExposure
+            val frameDuration = maxOf(
+                exposureNs,
+                1_000_000_000L / ratePlan.framesPerSecond.coerceAtLeast(1)
+            )
+
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs)
+            builder.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDuration)
+            builder.set(
+                CaptureRequest.FLASH_MODE,
+                if (torch) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF
+            )
+        } else {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            builder.set(
+                CaptureRequest.FLASH_MODE,
+                if (torch) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF
+            )
+            ratePlan.aeFpsRange?.let { range ->
+                builder.set(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    android.util.Range(range.first, range.last)
+                )
+            }
+        }
+
+        applyAntiBanding(builder, standard)
+
+        if (isManualFocusActive()) {
+            val maxFocus = manualCapabilities.minimumFocusDistance ?: 0f
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            builder.set(
+                CaptureRequest.LENS_FOCUS_DISTANCE,
+                (manualSettings.focusDioptres ?: 0f).coerceIn(0f, maxFocus)
+            )
+            if (supportsAeRegions) {
+                aeRect?.let { builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it)) }
+            }
+        } else {
+            applyFocusMetering(builder)
+        }
+    }
+
+    /**
+     * Best-effort flicker reduction: 50 Hz for PAL, 60 Hz for NTSC. Devices
+     * that only advertise AUTO/OFF simply keep their default.
+     */
+    private fun applyAntiBanding(builder: CaptureRequest.Builder, standard: VideoStandard) {
+        val available = characteristics
+            ?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_ANTIBANDING_MODES)
+            ?: return
+        val desired = if (standard == VideoStandard.PAL) {
+            CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ
+        } else {
+            CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ
+        }
+        if (available.contains(desired)) {
+            builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, desired)
         }
     }
 
@@ -2956,8 +3107,8 @@ fun Camera2PreviewView(
                 captureController.liveShutterState.value = shutter
                 captureController.liveFocusState.value = focus
             }
-            captureController.startRecordingAction = { rotationDegrees, onStarted, onError ->
-                holder.startRecording(rotationDegrees, onStarted, onError)
+            captureController.startRecordingAction = { rotationDegrees, standard, onStarted, onError ->
+                holder.startRecording(rotationDegrees, standard, onStarted, onError)
             }
             captureController.stopRecordingAction = { onFinished ->
                 holder.stopRecording(onFinished)

@@ -21,6 +21,7 @@ import android.util.Log
 import android.util.Size
 import androidx.core.content.ContextCompat
 import com.example.cameraselect.model.ManualCapabilities
+import com.example.cameraselect.model.VideoStandard
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -146,6 +147,44 @@ object CameraCaptureManager {
 
         val best = candidates.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: videoSizes[0]
         return landscapeSize(best)
+    }
+
+    /**
+     * Resolves the frame rate and AE range for one recording. A lens that
+     * cannot sustain 50/60 fps at [videoSize] falls back to 25/30 fps.
+     */
+    fun resolveVideoRatePlan(
+        characteristics: CameraCharacteristics,
+        videoSize: Size,
+        standard: VideoStandard
+    ): VideoRatePlan {
+        val ranges = characteristics
+            .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            ?.map { it.lower..it.upper }
+            ?: emptyList()
+        return VideoRatePlanner.plan(
+            standard = standard,
+            availableFpsRanges = ranges,
+            minFrameDurationNs = minFrameDurationFor(characteristics, videoSize)
+        )
+    }
+
+    private fun minFrameDurationFor(
+        characteristics: CameraCharacteristics,
+        size: Size
+    ): Long? {
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?: return null
+        val duration = try {
+            map.getOutputMinFrameDuration(MediaRecorder::class.java, size)
+        } catch (_: Exception) {
+            try {
+                map.getOutputMinFrameDuration(android.graphics.SurfaceTexture::class.java, size)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return duration?.takeIf { it > 0L }
     }
 
     private fun computeOrientation(characteristics: CameraCharacteristics, deviceRotationDegrees: Int, defaultSensorOrientation: Int): Int {
@@ -397,7 +436,8 @@ object CameraCaptureManager {
         pfd: ParcelFileDescriptor,
         characteristics: CameraCharacteristics,
         videoSize: Size,
-        deviceRotationDegrees: Int
+        deviceRotationDegrees: Int,
+        frameRate: Int = 30
     ): MediaRecorder? {
         return try {
             val recorder = MediaRecorder(context)
@@ -417,8 +457,11 @@ object CameraCaptureManager {
             recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             recorder.setOutputFile(pfd.fileDescriptor)
-            recorder.setVideoEncodingBitRate(12_000_000)
-            recorder.setVideoFrameRate(30)
+            val bitRate = (12_000_000L * frameRate / 30L)
+                .coerceIn(10_000_000L, 24_000_000L)
+                .toInt()
+            recorder.setVideoEncodingBitRate(bitRate)
+            recorder.setVideoFrameRate(frameRate)
             recorder.setVideoSize(videoSize.width, videoSize.height)
             recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
 

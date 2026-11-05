@@ -4,10 +4,11 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateOf
 import com.example.cameraselect.model.ManualCameraSettings
 import com.example.cameraselect.model.ManualCapabilities
+import com.example.cameraselect.model.VideoStandard
 
 class CameraCaptureController {
     var takePhotoAction: ((rotationDegrees: Int, saveRaw: Boolean, onCaptured: (Uri?, Uri?) -> Unit) -> Boolean)? = null
-    var startRecordingAction: ((rotationDegrees: Int, onStarted: () -> Unit, onError: (String) -> Unit) -> Unit)? = null
+    var startRecordingAction: ((rotationDegrees: Int, standard: VideoStandard, onStarted: () -> Unit, onError: (String) -> Unit) -> Unit)? = null
     var stopRecordingAction: ((onFinished: (Uri?) -> Unit) -> Unit)? = null
     var isDarkSceneAction: (() -> Boolean)? = null
     var tapToFocusAction: ((x: Float, y: Float) -> Boolean)? = null
@@ -29,8 +30,13 @@ class CameraCaptureController {
     fun takePhoto(rotationDegrees: Int, saveRaw: Boolean, onCaptured: (Uri?, Uri?) -> Unit): Boolean =
         takePhotoAction?.invoke(rotationDegrees, saveRaw, onCaptured) ?: false
 
-    fun startRecording(rotationDegrees: Int, onStarted: () -> Unit, onError: (String) -> Unit) {
-        startRecordingAction?.invoke(rotationDegrees, onStarted, onError)
+    fun startRecording(
+        rotationDegrees: Int,
+        standard: VideoStandard,
+        onStarted: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        startRecordingAction?.invoke(rotationDegrees, standard, onStarted, onError)
     }
 
     fun stopRecording(onFinished: (Uri?) -> Unit) {

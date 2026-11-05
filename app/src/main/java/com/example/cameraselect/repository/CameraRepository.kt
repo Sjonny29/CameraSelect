@@ -12,6 +12,7 @@ import com.example.cameraselect.model.CameraLensInfo
 import com.example.cameraselect.model.FlashMode
 import com.example.cameraselect.model.LensFacing
 import com.example.cameraselect.model.PhotoFormat
+import com.example.cameraselect.model.VideoStandard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -329,6 +330,13 @@ class CameraRepository(private val context: Context) {
 
     fun setPhotoFormat(format: PhotoFormat) {
         prefs.edit { putString("photo_format", format.name) }
+    }
+
+    fun getVideoStandard(): VideoStandard =
+        VideoStandard.fromName(prefs.getString("video_standard", null))
+
+    fun setVideoStandard(standard: VideoStandard) {
+        prefs.edit { putString("video_standard", standard.name) }
     }
 
     private fun facingKey(prefix: String, facing: LensFacing): String =

@@ -115,40 +115,35 @@ class ExposureScaleTest {
     }
 
     @Test
-    fun magneticPullIsBoundedAndSettlesOnTheStop() {
-        val stops = listOf(0f, 50f, 100f)
-
-        val pulled = ExposureScale.magneticPosition(51f, stops)
-        assertTrue(pulled >= 50f)
-        assertTrue(pulled < 51f)
-        assertEquals(50f, ExposureScale.settlePosition(51f, stops), 0.0001f)
+    fun arbitraryIsoValuesSurviveTheRoundTrip() {
+        for (iso in listOf(1234, 3777, 4321)) {
+            val position = ExposureScale.isoPosition(iso, isoRange)
+            assertEquals(iso, ExposureScale.isoAt(position, isoRange))
+        }
     }
 
     @Test
-    fun deliberatePushThroughKeepsTheFineValue() {
-        val stops = listOf(0f, 50f, 100f)
+    fun arbitraryShutterValuesAreNotForcedOntoAStandardStop() {
+        // 1/200 s sits between the 1/250 and 1/125 full stops.
+        for (ns in listOf(5_000_000L, 6_250_000L, 12_345_678L)) {
+            val position = ExposureScale.shutterPosition(ns, shutterRange)
+            val roundTripped = ExposureScale.shutterAt(position, shutterRange)
 
-        assertEquals(54f, ExposureScale.magneticPosition(54f, stops), 0.0001f)
-        assertEquals(54f, ExposureScale.settlePosition(54f, stops), 0.0001f)
+            assertTrue(
+                "round trip for $ns was $roundTripped",
+                abs(roundTripped - ns) <= 1_000L
+            )
+        }
     }
 
     @Test
-    fun snappingOnlyHappensRightNextToAStop() {
-        val stops = listOf(0f, 50f, 100f)
-        val window = ExposureScale.snapWindow(50f, stops)
+    fun finePositionsBetweenStopsDoNotDriftTowardAStop() {
+        val position = ExposureScale.isoPosition(1234, isoRange)
+        val iso = ExposureScale.isoAt(position, isoRange)
+        val recomputed = ExposureScale.isoPosition(iso, isoRange)
 
-        // Just inside the narrow window settles; just outside stays fine.
-        assertEquals(50f, ExposureScale.settlePosition(50f + window * 0.9f, stops), 0.0001f)
-        assertEquals(50f + window * 1.1f, ExposureScale.settlePosition(50f + window * 1.1f, stops), 0.0001f)
-    }
-
-    @Test
-    fun snapWindowShrinksWhenStopsAreClose() {
-        val wide = listOf(0f, 50f, 100f)
-        val tight = listOf(0f, 4.8f, 9.6f)
-
-        assertEquals(1.8f, ExposureScale.snapWindow(50f, wide), 0.0001f)
-        assertEquals(0.864f, ExposureScale.snapWindow(4.8f, tight), 0.0001f)
+        assertEquals(position, recomputed, 0.0001f)
+        assertEquals(iso, ExposureScale.isoAt(recomputed, isoRange))
     }
 
     @Test

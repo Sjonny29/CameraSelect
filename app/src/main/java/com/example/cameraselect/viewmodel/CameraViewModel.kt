@@ -9,6 +9,7 @@ import com.example.cameraselect.model.CaptureMode
 import com.example.cameraselect.model.FlashMode
 import com.example.cameraselect.model.LensFacing
 import com.example.cameraselect.model.PhotoFormat
+import com.example.cameraselect.model.VideoStandard
 import com.example.cameraselect.repository.CameraRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _photoFormat = MutableStateFlow(repository.getPhotoFormat())
     val photoFormat: StateFlow<PhotoFormat> = _photoFormat.asStateFlow()
+
+    private val _videoStandard = MutableStateFlow(repository.getVideoStandard())
+    val videoStandard: StateFlow<VideoStandard> = _videoStandard.asStateFlow()
 
     private val _enabledCameraIds = MutableStateFlow<Set<String>>(emptySet())
     val enabledCameraIds: StateFlow<Set<String>> = _enabledCameraIds.asStateFlow()
@@ -125,7 +129,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cycleFlashMode() {
-        val nextMode = if (_captureMode.value == CaptureMode.VIDEO) {
+        val nextMode = if (_captureMode.value.isVideo) {
             if (_flashMode.value == FlashMode.OFF) FlashMode.TORCH else FlashMode.OFF
         } else {
             when (_flashMode.value) {
@@ -142,6 +146,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setPhotoFormat(format: PhotoFormat) {
         _photoFormat.value = format
         repository.setPhotoFormat(format)
+    }
+
+    fun setVideoStandard(standard: VideoStandard) {
+        _videoStandard.value = standard
+        repository.setVideoStandard(standard)
     }
 
     /**
@@ -186,7 +195,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setCaptureMode(mode: CaptureMode) {
         if (!_isRecording.value) {
             _captureMode.value = mode
-            if (mode == CaptureMode.VIDEO && (_flashMode.value == FlashMode.AUTO || _flashMode.value == FlashMode.ON)) {
+            if (mode.isVideo && (_flashMode.value == FlashMode.AUTO || _flashMode.value == FlashMode.ON)) {
                 _flashMode.value = FlashMode.OFF
                 repository.setFlashMode(FlashMode.OFF)
             }

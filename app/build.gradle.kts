@@ -10,9 +10,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.cameraselect"
+        applicationId = "io.github.sjonny29.cameraselect"
         minSdk = 31
-        targetSdk = 32
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
