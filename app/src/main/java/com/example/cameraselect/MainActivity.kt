@@ -102,6 +102,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -121,12 +122,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -1123,6 +1127,10 @@ private fun CaptureModeItem(
     }
 }
 
+// Unispace Bold (Raymond Larabie / Typodermic) is released under CC0, so it can
+// be bundled in the app.
+private val UnispaceBold = FontFamily(Font(R.font.unispace_bold, FontWeight.Bold))
+
 @Composable
 fun PhotoFormatToggle(
     currentFormat: PhotoFormat,
@@ -1135,7 +1143,7 @@ fun PhotoFormatToggle(
         onClick = onToggle,
         shape = CircleShape,
         color = Color.Black.copy(alpha = 0.45f),
-        contentColor = Color(0xFFFFD700),
+        contentColor = Color.White,
         modifier = modifier
             .size(56.dp)
             .semantics(mergeDescendants = true) {
@@ -1147,25 +1155,47 @@ fun PhotoFormatToggle(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "JPEG",
-                    color = Color(0xFFFFD700),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.2.sp,
-                    maxLines = 1
+            // The label is treated like an icon, so a large system font scale
+            // cannot overflow the circle.
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = LocalDensity.current.density,
+                    fontScale = 1f
                 )
+            ) {
                 if (isRawEnabled) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "JPEG",
+                            color = Color.White,
+                            fontFamily = UnispaceBold,
+                            fontSize = 15.sp,
+                            lineHeight = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "RAW",
+                            color = Color.White,
+                            fontFamily = UnispaceBold,
+                            fontSize = 23.sp,
+                            lineHeight = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                } else {
                     Text(
-                        text = "RAW",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 8.sp,
+                        text = "JPEG",
+                        color = Color.White,
+                        fontFamily = UnispaceBold,
+                        fontSize = 23.sp,
+                        lineHeight = 23.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp,
                         maxLines = 1
                     )
                 }
