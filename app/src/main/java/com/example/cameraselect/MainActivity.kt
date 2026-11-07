@@ -1172,18 +1172,18 @@ fun PhotoFormatToggle(
                             text = "JPEG",
                             color = Color.White,
                             fontFamily = UnispaceBold,
-                            fontSize = 15.sp,
-                            lineHeight = 12.sp,
+                            fontSize = 13.sp,
+                            lineHeight = 13.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(5.dp))
                         Text(
                             text = "RAW",
                             color = Color.White,
                             fontFamily = UnispaceBold,
-                            fontSize = 23.sp,
-                            lineHeight = 20.sp,
+                            fontSize = 19.sp,
+                            lineHeight = 19.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
@@ -1193,8 +1193,8 @@ fun PhotoFormatToggle(
                         text = "JPEG",
                         color = Color.White,
                         fontFamily = UnispaceBold,
-                        fontSize = 23.sp,
-                        lineHeight = 23.sp,
+                        fontSize = 19.sp,
+                        lineHeight = 19.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
