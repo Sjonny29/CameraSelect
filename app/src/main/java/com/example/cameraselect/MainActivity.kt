@@ -102,12 +102,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -120,13 +122,22 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.cameraselect.capture.AeFlashState
@@ -567,6 +578,22 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
         }
     }
 
+    // Leaving the app must finalize a running recording before the camera
+    // session is released, otherwise the timer keeps running and the file can
+    // be left unfinished.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && viewModel.isRecording.value) {
+                onStopRecording()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     // Gallery / Media Viewer viewer action
     val onOpenGallery: () -> Unit = {
         val uri = lastCapturedMediaUri
@@ -757,9 +784,18 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (captureMode.isPhoto && selectedLensSupportsRaw) {
-                PhotoFormatSelector(
+                PhotoFormatToggle(
                     currentFormat = photoFormat,
-                    onFormatSelected = { viewModel.setPhotoFormat(it) }
+                    onToggle = {
+                        viewModel.setPhotoFormat(
+                            if (photoFormat == PhotoFormat.JPEG_PLUS_RAW) {
+                                PhotoFormat.JPEG
+                            } else {
+                                PhotoFormat.JPEG_PLUS_RAW
+                            }
+                        )
+                    },
+                    modifier = Modifier.rotate(buttonRotation)
                 )
             }
 
@@ -869,6 +905,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                         captureController.manualSettingsState.value = ManualCameraSettings()
                         openProControl = null
                     },
+                    rotationDegrees = buttonRotation,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
             }
@@ -933,6 +970,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                     settings = manualSettings,
                     capabilities = manualCapabilities,
                     visibleRows = proVisibleRows,
+                    rotationDegrees = buttonRotation,
                     onIsoChanged = { iso ->
                         val current = captureController.manualSettingsState.value
                         val base = if (current.manualExposure) {
@@ -1025,7 +1063,7 @@ fun ProCaptureModeToggle(
                 imageVector = if (isVideo) Icons.Default.PhotoCamera else Icons.Default.Videocam,
                 contentDescription = if (isVideo) "Switch to photo mode" else "Switch to video mode",
                 tint = Color(0xFFFFD700),
-                modifier = Modifier.size(30.dp)
+                modifier = Modifier.size(44.dp)
             )
         }
     }
@@ -1089,54 +1127,80 @@ private fun CaptureModeItem(
     }
 }
 
-@Composable
-fun PhotoFormatSelector(
-    currentFormat: PhotoFormat,
-    onFormatSelected: (PhotoFormat) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = CircleShape,
-        color = Color.Black.copy(alpha = 0.45f),
-        modifier = modifier
-    ) {
-        Row(
-            modifier = Modifier.padding(3.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            PhotoFormatItem(
-                title = "JPEG",
-                isSelected = currentFormat == PhotoFormat.JPEG,
-                onClick = { onFormatSelected(PhotoFormat.JPEG) }
-            )
-            PhotoFormatItem(
-                title = "JPEG + RAW",
-                isSelected = currentFormat == PhotoFormat.JPEG_PLUS_RAW,
-                onClick = { onFormatSelected(PhotoFormat.JPEG_PLUS_RAW) }
-            )
-        }
-    }
-}
+// Unispace Bold (Raymond Larabie / Typodermic) is released under CC0, so it can
+// be bundled in the app.
+private val UnispaceBold = FontFamily(Font(R.font.unispace_bold, FontWeight.Bold))
 
 @Composable
-private fun PhotoFormatItem(
-    title: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
+fun PhotoFormatToggle(
+    currentFormat: PhotoFormat,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
+    val isRawEnabled = currentFormat == PhotoFormat.JPEG_PLUS_RAW
+
     Surface(
-        onClick = onClick,
+        onClick = onToggle,
         shape = CircleShape,
-        color = if (isSelected) Color(0xFFFFD700) else Color.Transparent,
-        contentColor = if (isSelected) Color.Black else Color.White.copy(alpha = 0.85f),
-        modifier = Modifier.padding(horizontal = 2.dp)
+        color = Color.Black.copy(alpha = 0.45f),
+        contentColor = Color.White,
+        modifier = modifier
+            .size(56.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (isRawEnabled) "JPEG and RAW" else "JPEG"
+                stateDescription = if (isRawEnabled) "JPEG and RAW enabled" else "JPEG only"
+            }
     ) {
-        Text(
-            text = title,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-        )
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            // The label is treated like an icon, so a large system font scale
+            // cannot overflow the circle.
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = LocalDensity.current.density,
+                    fontScale = 1f
+                )
+            ) {
+                if (isRawEnabled) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "JPEG",
+                            color = Color.White,
+                            fontFamily = UnispaceBold,
+                            fontSize = 13.sp,
+                            lineHeight = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        Spacer(modifier = Modifier.height(5.dp))
+                        Text(
+                            text = "RAW",
+                            color = Color.White,
+                            fontFamily = UnispaceBold,
+                            fontSize = 19.sp,
+                            lineHeight = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "JPEG",
+                        color = Color.White,
+                        fontFamily = UnispaceBold,
+                        fontSize = 19.sp,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1470,10 +1534,12 @@ private class CameraSessionHolder {
     var backgroundThread: HandlerThread? = null
     var backgroundHandler: Handler? = null
 
-    var mediaRecorder: MediaRecorder? = null
-    var currentRecordingPfd: ParcelFileDescriptor? = null
-    var currentRecordingUri: Uri? = null
-    var isRecording: Boolean = false
+    @Volatile var mediaRecorder: MediaRecorder? = null
+    @Volatile var currentRecordingPfd: ParcelFileDescriptor? = null
+    @Volatile var currentRecordingUri: Uri? = null
+    @Volatile var isRecording: Boolean = false
+    /** True while the recorder is being prepared, before [isRecording] flips. */
+    @Volatile var isStartingRecording: Boolean = false
     var recordingStartTime: Long = 0L
     var videoRequestBuilder: CaptureRequest.Builder? = null
 
@@ -1497,8 +1563,8 @@ private class CameraSessionHolder {
     var cameraId: String = ""
     var characteristics: CameraCharacteristics? = null
 
-    var isClosed: Boolean = false
-    var isOpening: Boolean = false
+    @Volatile var isClosed: Boolean = false
+    @Volatile var isOpening: Boolean = false
 
     var supportsRaw: Boolean = false
     var rawCaptureEnabled: Boolean = false
@@ -2616,102 +2682,150 @@ private class CameraSessionHolder {
         val ctx = context
         val prevSurface = previewSurface
 
-        if (isRecording || dev == null || chars == null || ctx == null || prevSurface == null) {
+        if (isRecording || isStartingRecording || dev == null || chars == null || ctx == null || prevSurface == null) {
             onError("Camera not ready for recording")
             return
         }
 
-        val videoUriPair = CameraCaptureManager.createVideoUri(ctx)
-        if (videoUriPair == null) {
-            onError("Could not prepare video storage")
-            return
-        }
-        val (videoUri, pfd) = videoUriPair
+        isStartingRecording = true
 
-        val videoSize = CameraCaptureManager.chooseOptimalVideoSize(chars)
-        val ratePlan = CameraCaptureManager.resolveVideoRatePlan(chars, videoSize, standard)
-        val recorder = CameraCaptureManager.prepareMediaRecorder(
-            ctx,
-            pfd,
-            chars,
-            videoSize,
-            deviceRotationDegrees,
-            frameRate = ratePlan.framesPerSecond
-        )
-        if (recorder == null) {
-            try { pfd.close() } catch (_: Exception) {}
-            CameraCaptureManager.discardVideo(ctx, videoUri)
-            onError("Could not prepare video recorder")
-            return
-        }
+        // Preparing the MediaRecorder touches MediaStore and the codec stack,
+        // which is far too slow for the UI thread. Doing it on the camera
+        // background thread keeps the preview smooth while the encoder warms
+        // up, so the first second of the clip does not stutter.
+        val prepare = Runnable {
+            if (isClosed) {
+                isStartingRecording = false
+                ContextCompat.getMainExecutor(ctx).execute { onError("Camera is not available") }
+                return@Runnable
+            }
 
-        currentRecordingUri = videoUri
-        currentRecordingPfd = pfd
-        mediaRecorder = recorder
+            val videoUriPair = CameraCaptureManager.createVideoUri(ctx)
+            if (videoUriPair == null) {
+                isStartingRecording = false
+                ContextCompat.getMainExecutor(ctx).execute { onError("Could not prepare video storage") }
+                return@Runnable
+            }
+            val (videoUri, pfd) = videoUriPair
 
-        try {
-            session?.close()
-            session = null
-
-            val outputs = listOf(
-                OutputConfiguration(prevSurface),
-                OutputConfiguration(recorder.surface)
+            val videoSize = CameraCaptureManager.chooseOptimalVideoSize(chars)
+            val ratePlan = CameraCaptureManager.resolveVideoRatePlan(chars, videoSize, standard)
+            val recorder = CameraCaptureManager.prepareMediaRecorder(
+                ctx,
+                pfd,
+                chars,
+                videoSize,
+                deviceRotationDegrees,
+                frameRate = ratePlan.framesPerSecond
             )
+            if (recorder == null) {
+                try { pfd.close() } catch (_: Exception) {}
+                CameraCaptureManager.discardVideo(ctx, videoUri)
+                isStartingRecording = false
+                ContextCompat.getMainExecutor(ctx).execute { onError("Could not prepare video recorder") }
+                return@Runnable
+            }
 
-            val sessionConfig = SessionConfiguration(
-                SessionConfiguration.SESSION_REGULAR,
-                outputs,
-                ContextCompat.getMainExecutor(ctx),
-                object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(newSession: CameraCaptureSession) {
-                        if (isClosed) {
-                            newSession.close()
-                            return
-                        }
-                        session = newSession
-                        try {
-                            val recordBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
-                            recordBuilder.addTarget(prevSurface)
-                            recordBuilder.addTarget(recorder.surface)
-                            videoRequestBuilder = recordBuilder
+            currentRecordingUri = videoUri
+            currentRecordingPfd = pfd
+            mediaRecorder = recorder
 
-                            if (supportsAutoFocus && !isTapFocusActive) {
-                                previewAfMode = videoAfMode
+            ContextCompat.getMainExecutor(ctx).execute {
+                if (isClosed || !isStartingRecording) {
+                    cleanUpFailedRecording()
+                    return@execute
+                }
+
+                try {
+                    session?.close()
+                    session = null
+
+                    val outputs = listOf(
+                        OutputConfiguration(prevSurface),
+                        OutputConfiguration(recorder.surface)
+                    )
+
+                    val sessionConfig = SessionConfiguration(
+                        SessionConfiguration.SESSION_REGULAR,
+                        outputs,
+                        ContextCompat.getMainExecutor(ctx),
+                        object : CameraCaptureSession.StateCallback() {
+                            override fun onConfigured(newSession: CameraCaptureSession) {
+                                if (isClosed || !isStartingRecording) {
+                                    newSession.close()
+                                    cleanUpFailedRecording()
+                                    restartPreviewSession()
+                                    return
+                                }
+                                session = newSession
+                                try {
+                                    val recordBuilder = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+                                    recordBuilder.addTarget(prevSurface)
+                                    recordBuilder.addTarget(recorder.surface)
+                                    videoRequestBuilder = recordBuilder
+
+                                    if (supportsAutoFocus && !isTapFocusActive) {
+                                        previewAfMode = videoAfMode
+                                    }
+
+                                    // Decide the torch before the first frame so the
+                                    // AUTO detector cannot re-send the repeating
+                                    // request (and skip frames) during the first
+                                    // second of the clip.
+                                    isTorchOnDuringRecording = resolveStartTorch()
+                                    applyVideoRequestSettings(recordBuilder, ratePlan, standard)
+
+                                    // Start the encoder before frames are routed to
+                                    // its surface. Otherwise early frames queue on
+                                    // the recorder surface and the first second
+                                    // plays back unevenly.
+                                    recorder.start()
+                                    newSession.setRepeatingRequest(
+                                        recordBuilder.build(),
+                                        createRepeatingCallback(forRecording = true),
+                                        backgroundHandler
+                                    )
+                                    isRecording = true
+                                    isStartingRecording = false
+                                    recordingStartTime = SystemClock.elapsedRealtime()
+                                    onStarted()
+                                } catch (e: Exception) {
+                                    Log.e("Camera2Preview", "Failed to start media recorder", e)
+                                    onError("Failed to start recorder: ${e.message}")
+                                    cleanUpFailedRecording()
+                                    restartPreviewSession()
+                                }
                             }
 
-                            isTorchOnDuringRecording = hasFlash && flashMode == FlashMode.TORCH
-                            applyVideoRequestSettings(recordBuilder, ratePlan, standard)
-
-                            newSession.setRepeatingRequest(
-                                recordBuilder.build(),
-                                createRepeatingCallback(forRecording = true),
-                                backgroundHandler
-                            )
-                            recorder.start()
-                            isRecording = true
-                            recordingStartTime = SystemClock.elapsedRealtime()
-                            onStarted()
-                        } catch (e: Exception) {
-                            Log.e("Camera2Preview", "Failed to start media recorder", e)
-                            onError("Failed to start recorder: ${e.message}")
-                            cleanUpFailedRecording()
-                            restartPreviewSession()
+                            override fun onConfigureFailed(failedSession: CameraCaptureSession) {
+                                onError("Video session configuration failed")
+                                cleanUpFailedRecording()
+                                restartPreviewSession()
+                            }
                         }
-                    }
-
-                    override fun onConfigureFailed(failedSession: CameraCaptureSession) {
-                        onError("Video session configuration failed")
-                        cleanUpFailedRecording()
-                        restartPreviewSession()
-                    }
+                    )
+                    dev.createCaptureSession(sessionConfig)
+                } catch (e: Exception) {
+                    Log.e("Camera2Preview", "Failed to create video capture session", e)
+                    onError("Failed to start video: ${e.message}")
+                    cleanUpFailedRecording()
+                    restartPreviewSession()
                 }
-            )
-            dev.createCaptureSession(sessionConfig)
-        } catch (e: Exception) {
-            Log.e("Camera2Preview", "Failed to create video capture session", e)
-            onError("Failed to start video: ${e.message}")
-            cleanUpFailedRecording()
-            restartPreviewSession()
+            }
+        }
+
+        val handler = backgroundHandler
+        if (handler != null) handler.post(prepare) else prepare.run()
+    }
+
+    /** Torch state the recording request starts with, decided from the already
+     *  measured preview scene so it does not change under the first frames. */
+    private fun resolveStartTorch(): Boolean {
+        if (!hasFlash) return false
+        return when (flashMode) {
+            FlashMode.TORCH -> true
+            FlashMode.AUTO -> isDarkScene
+            FlashMode.ON, FlashMode.OFF -> false
         }
     }
 
@@ -2725,7 +2839,7 @@ private class CameraSessionHolder {
         ratePlan: VideoRatePlan,
         standard: VideoStandard
     ) {
-        val torch = hasFlash && flashMode == FlashMode.TORCH
+        val torch = isTorchOnDuringRecording
 
         if (isManualExposureActive()) {
             val iso = manualCapabilities.isoRange?.let {
@@ -2825,21 +2939,43 @@ private class CameraSessionHolder {
 
     private fun cleanUpFailedRecording() {
         isRecording = false
+        isStartingRecording = false
+        isTorchOnDuringRecording = false
         videoRequestBuilder = null
-        try { mediaRecorder?.reset() } catch (_: Exception) {}
-        try { mediaRecorder?.release() } catch (_: Exception) {}
+
+        // Detach the recorder synchronously so a retry cannot see a half-open
+        // one, but release it on the same background thread that prepared it.
+        val recorder = mediaRecorder
+        val pfd = currentRecordingPfd
+        val uri = currentRecordingUri
+        val ctx = context
         mediaRecorder = null
-        try { currentRecordingPfd?.close() } catch (_: Exception) {}
         currentRecordingPfd = null
-        currentRecordingUri?.let { uri ->
-            context?.let { ctx -> CameraCaptureManager.discardVideo(ctx, uri) }
-        }
         currentRecordingUri = null
+
+        val teardown = Runnable {
+            try { recorder?.reset() } catch (_: Exception) {}
+            try { recorder?.release() } catch (_: Exception) {}
+            try { pfd?.close() } catch (_: Exception) {}
+            if (uri != null && ctx != null) {
+                CameraCaptureManager.discardVideo(ctx, uri)
+            }
+        }
+        val handler = backgroundHandler
+        if (handler != null) handler.post(teardown) else teardown.run()
     }
 
     fun stopRecording(onFinished: (Uri?) -> Unit) {
         if (!isRecording) {
-            onFinished(null)
+            // A start that is still warming up must not flip into recording
+            // after the caller asked to stop (for example when backgrounding).
+            if (isStartingRecording) {
+                isStartingRecording = false
+                cleanUpFailedRecording()
+                restartPreviewSession()
+            } else {
+                onFinished(null)
+            }
             return
         }
 
@@ -2849,7 +2985,14 @@ private class CameraSessionHolder {
         val uri = currentRecordingUri
 
         isRecording = false
+        isStartingRecording = false
         isTorchOnDuringRecording = false
+
+        // Detach synchronously: a concurrent close() must not discard the file
+        // that this stop is about to finalize.
+        mediaRecorder = null
+        currentRecordingPfd = null
+        currentRecordingUri = null
 
         videoRequestBuilder = null
         if (supportsAutoFocus) {
@@ -2858,7 +3001,7 @@ private class CameraSessionHolder {
         isTapFocusActive = false
         isAfLocked = false
 
-        backgroundHandler?.post {
+        val finish = Runnable {
             val elapsed = SystemClock.elapsedRealtime() - recordingStartTime
             if (elapsed < 1200) {
                 try {
@@ -2895,10 +3038,12 @@ private class CameraSessionHolder {
                     }
                 }
             }
-            currentRecordingUri = null
 
             restartPreviewSession()
         }
+
+        val handler = backgroundHandler
+        if (handler != null) handler.post(finish) else finish.run()
     }
 
     fun restartPreviewSession() {
@@ -2973,17 +3118,46 @@ private class CameraSessionHolder {
     fun close() {
         isClosed = true
         isOpening = false
-        if (isRecording) {
-            try { mediaRecorder?.stop() } catch (_: Exception) {}
-            try { mediaRecorder?.release() } catch (_: Exception) {}
-            mediaRecorder = null
-            try { currentRecordingPfd?.close() } catch (_: Exception) {}
-            currentRecordingPfd = null
-            currentRecordingUri?.let { uri ->
-                context?.let { ctx -> CameraCaptureManager.finalizeVideo(ctx, uri) }
+        isStartingRecording = false
+
+        // Take the recorder off the holder synchronously, then release it on
+        // the camera background thread that prepared it.
+        val recorder = mediaRecorder
+        val pfd = currentRecordingPfd
+        val uri = currentRecordingUri
+        val ctx = context
+        val wasRecording = isRecording
+        mediaRecorder = null
+        currentRecordingPfd = null
+        currentRecordingUri = null
+        isRecording = false
+        isTorchOnDuringRecording = false
+        videoRequestBuilder = null
+
+        if (recorder != null || pfd != null || uri != null) {
+            val teardown = Runnable {
+                var stopped = false
+                if (wasRecording) {
+                    try {
+                        recorder?.stop()
+                        stopped = true
+                    } catch (e: Exception) {
+                        Log.e("Camera2Preview", "MediaRecorder.stop() failed during close", e)
+                    }
+                }
+                try { recorder?.reset() } catch (_: Exception) {}
+                try { recorder?.release() } catch (_: Exception) {}
+                try { pfd?.close() } catch (_: Exception) {}
+                if (uri != null && ctx != null) {
+                    if (wasRecording && stopped) {
+                        CameraCaptureManager.finalizeVideo(ctx, uri)
+                    } else {
+                        CameraCaptureManager.discardVideo(ctx, uri)
+                    }
+                }
             }
-            currentRecordingUri = null
-            isRecording = false
+            val handler = backgroundHandler
+            if (handler != null) handler.post(teardown) else teardown.run()
         }
 
         try {
@@ -3073,8 +3247,54 @@ fun Camera2PreviewView(
         onHasFlashChanged(hasFlash)
     }
 
-    key(cameraId, isNoCrop) {
+    // Recreate the camera session after the app returns from the background.
+    // Without this, a surface that was destroyed while away leaves the holder
+    // permanently closed and the preview stuck on its last frame.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var sessionGeneration by remember(cameraId, isNoCrop) { mutableIntStateOf(0) }
+    var previewStartedOnce by remember(cameraId, isNoCrop) { mutableStateOf(false) }
+
+    DisposableEffect(lifecycleOwner, cameraId, isNoCrop) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                if (previewStartedOnce) {
+                    sessionGeneration++
+                } else {
+                    previewStartedOnce = true
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    key(cameraId, isNoCrop, sessionGeneration) {
         val holder = remember(cameraId, isNoCrop) { CameraSessionHolder() }
+        // Guards against a surface callback firing on a holder that was closed
+        // while the app was in the background. Regenerating the key builds a
+        // fresh holder and TextureView instead of reusing the dead one.
+        var reopenRequested by remember(holder) { mutableStateOf(false) }
+
+        fun openOrRecreate(
+            textureView: TextureView,
+            surface: SurfaceTexture,
+            width: Int,
+            height: Int
+        ) {
+            if (holder.isClosed) {
+                if (!reopenRequested) {
+                    reopenRequested = true
+                    sessionGeneration++
+                }
+                return
+            }
+            openCameraSession(
+                context, cameraManager, cameraId, isMirrored, isNoCrop, flashMode,
+                captureRaw, textureView, surface, width, height, holder, deviceRotationDegrees
+            )
+        }
 
         LaunchedEffect(holder, isVideoMode) {
             holder.isVideoMode = isVideoMode
@@ -3156,7 +3376,7 @@ fun Camera2PreviewView(
                     TextureView(ctx).apply {
                         surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                                openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this@apply, surface, width, height, holder, deviceRotationDegrees)
+                                openOrRecreate(this@apply, surface, width, height)
                             }
 
                             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
@@ -3176,7 +3396,7 @@ fun Camera2PreviewView(
                         if (isAvailable && width > 0 && height > 0) {
                             val surface = surfaceTexture
                             if (surface != null) {
-                                openCameraSession(ctx, cameraManager, cameraId, isMirrored, isNoCrop, flashMode, captureRaw, this, surface, width, height, holder, deviceRotationDegrees)
+                                openOrRecreate(this, surface, width, height)
                             }
                         }
                     }

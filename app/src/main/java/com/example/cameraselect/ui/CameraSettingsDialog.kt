@@ -185,7 +185,16 @@ fun CameraSettingsDialog(
                             bottom = if (isLandscape) 18.dp else 28.dp
                         )
                 ) {
-                    // 1. Standard Lenses List
+                    // 1. Region (PAL / NTSC) selector
+                    RegionSettingRow(
+                        current = videoStandard,
+                        onStandardSelected = onVideoStandardChange,
+                        isLandscape = isLandscape
+                    )
+
+                    Spacer(modifier = Modifier.height(if (isLandscape) 6.dp else 12.dp))
+
+                    // 2. Standard Lenses List
                     for (camera in standardCameras) {
                         CameraSettingItem(
                             camera = camera,
@@ -197,7 +206,7 @@ fun CameraSettingsDialog(
 
                     Spacer(modifier = Modifier.height(if (isLandscape) 6.dp else 12.dp))
 
-                    // 2. Mirror image Toggle Row
+                    // 3. Mirror image Toggle Row
                     SettingToggleRow(
                         label = "Mirror image",
                         checked = isMirrored,
@@ -205,7 +214,7 @@ fun CameraSettingsDialog(
                         isLandscape = isLandscape
                     )
 
-                    // 3. No camera crop Toggle Row
+                    // 4. No camera crop Toggle Row
                     SettingToggleRow(
                         label = "No camera crop",
                         checked = noCrop,
@@ -213,18 +222,11 @@ fun CameraSettingsDialog(
                         isLandscape = isLandscape
                     )
 
-                    // 4. Show hidden lenses Toggle Row
+                    // 5. Show hidden lenses Toggle Row
                     SettingToggleRow(
                         label = "Show hidden lenses",
                         checked = showHidden,
                         onToggle = onToggleShowHidden,
-                        isLandscape = isLandscape
-                    )
-
-                    // 5. Region (PAL / NTSC) selector
-                    RegionSettingRow(
-                        current = videoStandard,
-                        onStandardSelected = onVideoStandardChange,
                         isLandscape = isLandscape
                     )
 
