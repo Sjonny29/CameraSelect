@@ -3,6 +3,7 @@ package com.example.cameraselect.ui.pro
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,7 +38,8 @@ val ProYellow = Color(0xFFFFD700)
  * Tapping a control pill opens (or closes) its wheel; values stream from CaptureResult
  * while exposure/focus are automatic. Tapping RESET resets all manual settings to AUTO.
  *
- * The control pills stay in portrait orientation regardless of device rotation.
+ * The control pills follow the device orientation: each pill is rotated so its
+ * label stays upright while the phone is held in landscape.
  */
 @Composable
 fun ProCameraDock(
@@ -46,6 +49,7 @@ fun ProCameraDock(
     openControl: ManualControlTarget?,
     onControlClick: (ManualControlTarget) -> Unit,
     modifier: Modifier = Modifier,
+    rotationDegrees: Float = 0f,
     onResetClick: () -> Unit = {},
 ) {
     val liveIso = controller.liveIsoState.value
@@ -57,65 +61,99 @@ fun ProCameraDock(
     val manualFocus = settings.manualFocus && capabilities.supportsManualFocus && (settings.focusDioptres != null)
 
     val hasManualSettings = manualExposure || manualFocus
+    val sideways = isSidewaysRotation(rotationDegrees)
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Max),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        ProDockPill(
-            title = "ISO",
-            value = if (manualExposure) {
-                ManualCameraValues.formatIso(settings.iso)
-            } else {
-                ManualCameraValues.formatIso(liveIso ?: settings.iso)
-            },
-            isActive = openControl == ManualControlTarget.ISO,
-            enabled = capabilities.supportsIso,
-            isAuto = !manualExposure,
-            onClick = { onControlClick(ManualControlTarget.ISO) },
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        // A rotated pill is as tall as it is wide. Reserve enough height for the
+        // widest slot so the four rotated pills never overlap the mode selector
+        // above or the shutter row below.
+        val slotWidth = (maxWidth - 18.dp) / 4f
+        val sidewaysRowHeight = maxOf(slotWidth + 8.dp, 56.dp)
+        val sidewaysPillHeight = 48.dp
+
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-        )
-        ProDockPill(
-            title = "SHUTTER",
-            value = if (manualExposure) {
-                ManualCameraValues.formatShutter(settings.shutterNs)
-            } else {
-                ManualCameraValues.formatShutter(liveShutter ?: settings.shutterNs)
-            },
-            isActive = openControl == ManualControlTarget.SHUTTER,
-            enabled = capabilities.supportsShutter,
-            isAuto = !manualExposure,
-            onClick = { onControlClick(ManualControlTarget.SHUTTER) },
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-        )
-        ProDockPill(
-            title = "FOCUS",
-            value = ManualCameraValues.formatFocus(
-                if (manualFocus) settings.focusDioptres else (liveFocus ?: settings.focusDioptres)
-            ),
-            isActive = openControl == ManualControlTarget.FOCUS,
-            enabled = capabilities.supportsManualFocus,
-            isAuto = !manualFocus,
-            onClick = { onControlClick(ManualControlTarget.FOCUS) },
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-        )
-        ProResetPill(
-            enabled = capabilities.supportsManualSensor || capabilities.supportsManualFocus,
-            hasManualSettings = hasManualSettings,
-            onClick = onResetClick,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-        )
+                .fillMaxWidth()
+                .then(
+                    if (sideways) {
+                        Modifier.height(sidewaysRowHeight)
+                    } else {
+                        Modifier.height(IntrinsicSize.Max)
+                    }
+                ),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ProDockPill(
+                title = "ISO",
+                value = if (manualExposure) {
+                    ManualCameraValues.formatIso(settings.iso)
+                } else {
+                    ManualCameraValues.formatIso(liveIso ?: settings.iso)
+                },
+                isActive = openControl == ManualControlTarget.ISO,
+                enabled = capabilities.supportsIso,
+                isAuto = !manualExposure,
+                onClick = { onControlClick(ManualControlTarget.ISO) },
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
+                    )
+                    .rotate(rotationDegrees)
+            )
+            ProDockPill(
+                title = "SHUTTER",
+                value = if (manualExposure) {
+                    ManualCameraValues.formatShutter(settings.shutterNs)
+                } else {
+                    ManualCameraValues.formatShutter(liveShutter ?: settings.shutterNs)
+                },
+                isActive = openControl == ManualControlTarget.SHUTTER,
+                enabled = capabilities.supportsShutter,
+                isAuto = !manualExposure,
+                onClick = { onControlClick(ManualControlTarget.SHUTTER) },
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
+                    )
+                    .rotate(rotationDegrees)
+            )
+            ProDockPill(
+                title = "FOCUS",
+                value = ManualCameraValues.formatFocus(
+                    if (manualFocus) settings.focusDioptres else (liveFocus ?: settings.focusDioptres)
+                ),
+                isActive = openControl == ManualControlTarget.FOCUS,
+                enabled = capabilities.supportsManualFocus,
+                isAuto = !manualFocus,
+                onClick = { onControlClick(ManualControlTarget.FOCUS) },
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
+                    )
+                    .rotate(rotationDegrees)
+            )
+            ProResetPill(
+                enabled = capabilities.supportsManualSensor || capabilities.supportsManualFocus,
+                hasManualSettings = hasManualSettings,
+                onClick = onResetClick,
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
+                    )
+                    .rotate(rotationDegrees)
+            )
+        }
     }
+}
+
+private fun isSidewaysRotation(rotationDegrees: Float): Boolean {
+    val normalized = ((rotationDegrees % 180f) + 180f) % 180f
+    return normalized in 45f..135f
 }
 
 @Composable
@@ -151,7 +189,8 @@ private fun ProDockPill(
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.Center
         ) {
             Text(
                 text = title,

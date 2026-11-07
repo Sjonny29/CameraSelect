@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -205,6 +206,7 @@ fun ProControlPanel(
         visibleRows = visibleRows,
         onAutoToggle = onAutoToggle,
         onClose = onClose,
+        rotationDegrees = rotationDegrees,
         modifier = modifier
     )
 }
@@ -217,6 +219,7 @@ private fun ExposurePanel(
     onAutoToggle: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    rotationDegrees: Float = 0f,
 ) {
     Column(
         modifier = modifier
@@ -228,7 +231,8 @@ private fun ExposurePanel(
                 color = Color.White.copy(alpha = 0.15f),
                 shape = RoundedCornerShape(16.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .rotate(rotationDegrees),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Header: title | close button.
