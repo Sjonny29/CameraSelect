@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -231,8 +232,7 @@ private fun ExposurePanel(
                 color = Color.White.copy(alpha = 0.15f),
                 shape = RoundedCornerShape(16.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 8.dp)
-            .rotate(rotationDegrees),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Header: title | close button.
@@ -270,32 +270,44 @@ private fun ExposurePanel(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Live value card.
+        // Live value card. Only the readout follows the device orientation; the
+        // panel around it stays screen-aligned. When sideways the card gets a
+        // little extra height so the rotated text cannot be clipped.
+        val sideways = isSidewaysRotation(rotationDegrees)
         Surface(
             shape = RoundedCornerShape(6.dp),
             color = Color(0xFFEDEDED),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (sideways) Modifier.height(72.dp) else Modifier)
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Box(
+                modifier = if (sideways) Modifier.fillMaxSize() else Modifier,
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = config?.valueText ?: "—",
-                    color = Color.Black,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1
-                )
-                Text(
-                    text = config?.unitLabel ?: "",
-                    color = Color.Black.copy(alpha = 0.6f),
-                    fontSize = 7.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.6.sp,
-                    maxLines = 1
-                )
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp, vertical = 3.dp)
+                        .rotate(rotationDegrees),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = config?.valueText ?: "—",
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = config?.unitLabel ?: "",
+                        color = Color.Black.copy(alpha = 0.6f),
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        maxLines = 1
+                    )
+                }
             }
         }
 
@@ -362,6 +374,12 @@ private fun ExposurePanel(
             }
         }
     }
+}
+
+/** True when the device is held sideways, where rotated text needs more room. */
+private fun isSidewaysRotation(rotationDegrees: Float): Boolean {
+    val normalized = ((rotationDegrees % 180f) + 180f) % 180f
+    return normalized in 45f..135f
 }
 
 private fun isoAt(

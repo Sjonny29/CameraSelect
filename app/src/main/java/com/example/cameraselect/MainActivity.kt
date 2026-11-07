@@ -384,7 +384,6 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val displayedFlashMode = if (isManualExposureActive) effectiveFlashMode else flashMode
     val configuration = LocalConfiguration.current
     val proVisibleRows = if (configuration.screenHeightDp < 700) 4 else 5
-    val proPanelSideways = isSidewaysRotation(buttonRotation)
 
     // Back closes the top-most overlay instead of leaving the camera screen.
     // Registered in reverse priority order: the settings overlay is on top.
@@ -957,14 +956,9 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
         if (!isRecording && isProMode && (openProControl == ManualControlTarget.ISO || openProControl == ManualControlTarget.SHUTTER)) {
             Box(
                 modifier = Modifier
-                    .align(
-                        if (proPanelSideways) Alignment.BottomCenter else Alignment.BottomEnd
-                    )
+                    .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(
-                        bottom = 175.dp,
-                        end = if (proPanelSideways) 0.dp else 16.dp
-                    )
+                    .padding(bottom = 175.dp, end = 16.dp)
             ) {
                 ProControlPanel(
                     target = openProControl!!,
