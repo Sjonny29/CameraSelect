@@ -38,8 +38,9 @@ val ProYellow = Color(0xFFFFD700)
  * Tapping a control pill opens (or closes) its wheel; values stream from CaptureResult
  * while exposure/focus are automatic. Tapping RESET resets all manual settings to AUTO.
  *
- * The control pills follow the device orientation: each pill is rotated so its
- * label stays upright while the phone is held in landscape.
+ * The pills themselves stay screen-aligned like the rest of the dock; only their
+ * contents follow the device orientation so the labels stay upright while the
+ * phone is held in landscape.
  */
 @Composable
 fun ProCameraDock(
@@ -64,12 +65,11 @@ fun ProCameraDock(
     val sideways = isSidewaysRotation(rotationDegrees)
 
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        // A rotated pill is as tall as it is wide. Reserve enough height for the
-        // widest slot so the four rotated pills never overlap the mode selector
-        // above or the shutter row below.
+        // A rotated label needs at least its own width in height. Reserving the
+        // slot width for each pill keeps the rotated text inside the rounded
+        // rectangle no matter how long the value or unit gets.
         val slotWidth = (maxWidth - 18.dp) / 4f
         val sidewaysRowHeight = maxOf(slotWidth + 8.dp, 56.dp)
-        val sidewaysPillHeight = 48.dp
 
         Row(
             modifier = Modifier
@@ -97,10 +97,8 @@ fun ProCameraDock(
                 onClick = { onControlClick(ManualControlTarget.ISO) },
                 modifier = Modifier
                     .weight(1f)
-                    .then(
-                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
-                    )
-                    .rotate(rotationDegrees)
+                    .fillMaxHeight(),
+                contentRotationDegrees = rotationDegrees
             )
             ProDockPill(
                 title = "SHUTTER",
@@ -115,10 +113,8 @@ fun ProCameraDock(
                 onClick = { onControlClick(ManualControlTarget.SHUTTER) },
                 modifier = Modifier
                     .weight(1f)
-                    .then(
-                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
-                    )
-                    .rotate(rotationDegrees)
+                    .fillMaxHeight(),
+                contentRotationDegrees = rotationDegrees
             )
             ProDockPill(
                 title = "FOCUS",
@@ -131,10 +127,8 @@ fun ProCameraDock(
                 onClick = { onControlClick(ManualControlTarget.FOCUS) },
                 modifier = Modifier
                     .weight(1f)
-                    .then(
-                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
-                    )
-                    .rotate(rotationDegrees)
+                    .fillMaxHeight(),
+                contentRotationDegrees = rotationDegrees
             )
             ProResetPill(
                 enabled = capabilities.supportsManualSensor || capabilities.supportsManualFocus,
@@ -142,10 +136,8 @@ fun ProCameraDock(
                 onClick = onResetClick,
                 modifier = Modifier
                     .weight(1f)
-                    .then(
-                        if (sideways) Modifier.height(sidewaysPillHeight) else Modifier.fillMaxHeight()
-                    )
-                    .rotate(rotationDegrees)
+                    .fillMaxHeight(),
+                contentRotationDegrees = rotationDegrees
             )
         }
     }
@@ -165,6 +157,7 @@ private fun ProDockPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     isAuto: Boolean = false,
+    contentRotationDegrees: Float = 0f,
 ) {
     val contentColor = when {
         isActive -> Color.Black
@@ -188,39 +181,46 @@ private fun ProDockPill(
         ),
         modifier = modifier
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-            verticalArrangement = Arrangement.Center
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = title,
-                fontSize = 8.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.sp,
-                color = contentColor.copy(alpha = 0.75f),
-                maxLines = 1
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                    .rotate(contentRotationDegrees),
+                verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = value,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
-                    modifier = Modifier.weight(1f, fill = false)
+                    text = title,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.sp,
+                    color = contentColor.copy(alpha = 0.75f),
+                    maxLines = 1
                 )
-                if (isAuto && enabled) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
-                        text = "AUTO",
-                        fontSize = 8.sp,
+                        text = value,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isActive) Color.Black else ProYellow,
-                        maxLines = 1
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (isAuto && enabled) {
+                        Text(
+                            text = "AUTO",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isActive) Color.Black else ProYellow,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -233,6 +233,7 @@ private fun ProResetPill(
     hasManualSettings: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    contentRotationDegrees: Float = 0f,
 ) {
     val contentColor = when {
         hasManualSettings -> ProYellow
@@ -268,7 +269,8 @@ private fun ProResetPill(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
                 maxLines = 1,
-                overflow = TextOverflow.Clip
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.rotate(contentRotationDegrees)
             )
         }
     }
