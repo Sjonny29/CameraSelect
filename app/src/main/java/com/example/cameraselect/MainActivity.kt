@@ -33,6 +33,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.TextureView
@@ -113,6 +114,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -175,6 +177,44 @@ import java.util.Locale
 import kotlin.OptIn as KotlinOptIn
 
 class MainActivity : ComponentActivity() {
+
+    /**
+     * Handles a hardware volume key press. Returns true when the press was taken
+     * as a shutter action, in which case the key event is consumed so the media
+     * volume does not change and no volume panel appears.
+     */
+    private var volumeKeyHandler: (() -> Boolean)? = null
+
+    /** Volume keys whose ACTION_DOWN was already used, so the matching UP is consumed. */
+    private val capturedVolumeKeys = mutableSetOf<Int>()
+
+    fun setVolumeKeyHandler(handler: (() -> Boolean)?) {
+        volumeKeyHandler = handler
+        if (handler == null) {
+            capturedVolumeKeys.clear()
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val keyCode = event.keyCode
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> {
+                    // Fire once per physical press; auto-repeat while the key is
+                    // held down is swallowed instead of filling the buffer.
+                    if (event.repeatCount == 0 && volumeKeyHandler?.invoke() == true) {
+                        capturedVolumeKeys.add(keyCode)
+                    }
+                    if (keyCode in capturedVolumeKeys) return true
+                }
+                KeyEvent.ACTION_UP -> {
+                    if (capturedVolumeKeys.remove(keyCode)) return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -575,6 +615,29 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             } else {
                 Toast.makeText(context, "Video could not be saved", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    // Hardware volume keys act as the shutter while the camera screen is shown.
+    // rememberUpdatedState keeps the handler pointed at the latest capture lambdas
+    // so it never fires against a stale recording state.
+    val latestVolumeShutter = rememberUpdatedState<() -> Boolean> {
+        if (isSettingsOpen) {
+            false
+        } else {
+            when (captureMode) {
+                CaptureMode.PHOTO, CaptureMode.PRO_PHOTO -> onTakePhoto()
+                CaptureMode.VIDEO, CaptureMode.PRO_VIDEO ->
+                    if (isRecording) onStopRecording() else onStartRecording()
+            }
+            true
+        }
+    }
+    val hostActivity = context as? MainActivity
+    DisposableEffect(hostActivity) {
+        hostActivity?.setVolumeKeyHandler { latestVolumeShutter.value() }
+        onDispose {
+            hostActivity?.setVolumeKeyHandler(null)
         }
     }
 
