@@ -3,15 +3,14 @@ package com.example.cameraselect.ui.pro
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -20,9 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cameraselect.capture.CameraCaptureController
@@ -62,83 +62,80 @@ fun ProCameraDock(
     val manualFocus = settings.manualFocus && capabilities.supportsManualFocus && (settings.focusDioptres != null)
 
     val hasManualSettings = manualExposure || manualFocus
-    val sideways = isSidewaysRotation(rotationDegrees)
 
-    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        // A rotated label needs at least its own width in height. Reserving the
-        // slot width for each pill keeps the rotated text inside the rounded
-        // rectangle no matter how long the value or unit gets.
-        val slotWidth = (maxWidth - 18.dp) / 4f
-        val sidewaysRowHeight = maxOf(slotWidth + 8.dp, 56.dp)
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth()) {
+            // Fixed height sized for the longest pill content. In landscape this
+            // height becomes the pill's visual width, so it must fit labels like
+            // "1/64000" (~37dp) and "102400" (~39dp) with margin.
+            val dockHeight = 48.dp
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (sideways) {
-                        Modifier.height(sidewaysRowHeight)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(dockHeight),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ProDockPill(
+                    title = "ISO",
+                    value = if (manualExposure) {
+                        ManualCameraValues.formatIso(settings.iso)
                     } else {
-                        Modifier.height(IntrinsicSize.Max)
-                    }
-                ),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ProDockPill(
-                title = "ISO",
-                value = if (manualExposure) {
-                    ManualCameraValues.formatIso(settings.iso)
-                } else {
-                    ManualCameraValues.formatIso(liveIso ?: settings.iso)
-                },
-                isActive = openControl == ManualControlTarget.ISO,
-                enabled = capabilities.supportsIso,
-                isAuto = !manualExposure,
-                onClick = { onControlClick(ManualControlTarget.ISO) },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentRotationDegrees = rotationDegrees
-            )
-            ProDockPill(
-                title = "SHUTTER",
-                value = if (manualExposure) {
-                    ManualCameraValues.formatShutter(settings.shutterNs)
-                } else {
-                    ManualCameraValues.formatShutter(liveShutter ?: settings.shutterNs)
-                },
-                isActive = openControl == ManualControlTarget.SHUTTER,
-                enabled = capabilities.supportsShutter,
-                isAuto = !manualExposure,
-                onClick = { onControlClick(ManualControlTarget.SHUTTER) },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentRotationDegrees = rotationDegrees
-            )
-            ProDockPill(
-                title = "FOCUS",
-                value = ManualCameraValues.formatFocus(
-                    if (manualFocus) settings.focusDioptres else (liveFocus ?: settings.focusDioptres)
-                ),
-                isActive = openControl == ManualControlTarget.FOCUS,
-                enabled = capabilities.supportsManualFocus,
-                isAuto = !manualFocus,
-                onClick = { onControlClick(ManualControlTarget.FOCUS) },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentRotationDegrees = rotationDegrees
-            )
-            ProResetPill(
-                enabled = capabilities.supportsManualSensor || capabilities.supportsManualFocus,
-                hasManualSettings = hasManualSettings,
-                onClick = onResetClick,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentRotationDegrees = rotationDegrees
-            )
+                        ManualCameraValues.formatIso(liveIso ?: settings.iso)
+                    },
+                    isActive = openControl == ManualControlTarget.ISO,
+                    enabled = capabilities.supportsIso,
+                    isAuto = !manualExposure,
+                    onClick = { onControlClick(ManualControlTarget.ISO) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentRotationDegrees = rotationDegrees
+                )
+                ProDockPill(
+                    title = "SHUTTER",
+                    value = if (manualExposure) {
+                        ManualCameraValues.formatShutter(settings.shutterNs)
+                    } else {
+                        ManualCameraValues.formatShutter(liveShutter ?: settings.shutterNs)
+                    },
+                    isActive = openControl == ManualControlTarget.SHUTTER,
+                    enabled = capabilities.supportsShutter,
+                    isAuto = !manualExposure,
+                    onClick = { onControlClick(ManualControlTarget.SHUTTER) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentRotationDegrees = rotationDegrees
+                )
+                ProDockPill(
+                    title = "FOCUS",
+                    value = ManualCameraValues.formatFocus(
+                        if (manualFocus) settings.focusDioptres else (liveFocus ?: settings.focusDioptres)
+                    ),
+                    isActive = openControl == ManualControlTarget.FOCUS,
+                    enabled = capabilities.supportsManualFocus,
+                    isAuto = !manualFocus,
+                    onClick = { onControlClick(ManualControlTarget.FOCUS) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentRotationDegrees = rotationDegrees
+                )
+                ProResetPill(
+                    enabled = capabilities.supportsManualSensor || capabilities.supportsManualFocus,
+                    hasManualSettings = hasManualSettings,
+                    onClick = onResetClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentRotationDegrees = rotationDegrees
+                )
+            }
         }
     }
 }
@@ -147,6 +144,32 @@ private fun isSidewaysRotation(rotationDegrees: Float): Boolean {
     val normalized = ((rotationDegrees % 180f) + 180f) % 180f
     return normalized in 45f..135f
 }
+
+private fun Modifier.rotatedContentLayout(rotationDegrees: Float): Modifier = this
+    .layout { measurable, constraints ->
+        val sideways = isSidewaysRotation(rotationDegrees)
+        if (!sideways) {
+            val placeable = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) {
+                placeable.place(0, 0)
+            }
+        } else {
+            val swappedConstraints = constraints.copy(
+                minWidth = constraints.minHeight,
+                maxWidth = constraints.maxHeight,
+                minHeight = constraints.minWidth,
+                maxHeight = constraints.maxWidth,
+            )
+            val placeable = measurable.measure(swappedConstraints)
+            layout(placeable.height, placeable.width) {
+                placeable.place(
+                    (placeable.height - placeable.width) / 2,
+                    (placeable.width - placeable.height) / 2
+                )
+            }
+        }
+    }
+    .rotate(rotationDegrees)
 
 @Composable
 private fun ProDockPill(
@@ -164,11 +187,16 @@ private fun ProDockPill(
         enabled -> Color.White
         else -> Color.White.copy(alpha = 0.35f)
     }
+    // Portrait stacks three lines inside a 38dp pill, so it needs explicit tight
+    // leading: the inherited bodyLarge line height (24sp) would make the block
+    // ~72dp tall and clip it. Landscape keeps the inherited leading, which is
+    // what spreads the three rotated labels evenly across the pill.
+    val sideways = isSidewaysRotation(contentRotationDegrees)
 
     Surface(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         color = when {
             isActive -> ProYellow
             enabled -> Color.Black.copy(alpha = 0.55f)
@@ -187,41 +215,41 @@ private fun ProDockPill(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
-                    .rotate(contentRotationDegrees),
-                verticalArrangement = Arrangement.Center
+                    .padding(horizontal = 2.dp, vertical = 1.dp)
+                    .rotatedContentLayout(contentRotationDegrees),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     text = title,
-                    fontSize = 8.sp,
+                    fontSize = 7.5.sp,
+                    lineHeight = if (sideways) TextUnit.Unspecified else 8.sp,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 1.sp,
+                    letterSpacing = 0.5.sp,
                     color = contentColor.copy(alpha = 0.75f),
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
+                if (isAuto && enabled) {
                     Text(
-                        text = value,
-                        fontSize = 13.sp,
+                        text = "AUTO",
+                        fontSize = 7.sp,
+                        lineHeight = if (sideways) TextUnit.Unspecified else 7.5.sp,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 0.5.sp,
+                        color = if (isActive) Color.Black else ProYellow,
                         maxLines = 1,
-                        overflow = TextOverflow.Clip,
-                        modifier = Modifier.weight(1f, fill = false)
+                        overflow = TextOverflow.Clip
                     )
-                    if (isAuto && enabled) {
-                        Text(
-                            text = "AUTO",
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isActive) Color.Black else ProYellow,
-                            maxLines = 1
-                        )
-                    }
                 }
+                Text(
+                    text = value,
+                    fontSize = 11.5.sp,
+                    lineHeight = if (sideways) TextUnit.Unspecified else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip
+                )
             }
         }
     }
@@ -244,7 +272,7 @@ private fun ProResetPill(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         color = when {
             hasManualSettings -> Color.Black.copy(alpha = 0.65f)
             enabled -> Color.Black.copy(alpha = 0.55f)
@@ -258,21 +286,18 @@ private fun ProResetPill(
         modifier = modifier
     ) {
         Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 4.dp, vertical = 4.dp)
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
             Text(
                 text = "RESET",
-                fontSize = 13.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Clip,
-                modifier = Modifier.rotate(contentRotationDegrees)
+                modifier = Modifier.rotatedContentLayout(contentRotationDegrees)
             )
         }
     }
 }
-

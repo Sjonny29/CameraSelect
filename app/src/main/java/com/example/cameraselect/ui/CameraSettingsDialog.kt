@@ -1,5 +1,6 @@
 package com.example.cameraselect.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -54,9 +55,11 @@ import com.example.cameraselect.model.LensFacing
 import com.example.cameraselect.model.VideoStandard
 import com.example.cameraselect.ui.theme.CameraSelectTheme
 
+private val YellowAccent = Color(0xFFFFD700)
+
 private fun Modifier.drawScrollbar(
     scrollState: ScrollState,
-    color: Color = Color(0xFF38ACFA),
+    color: Color = YellowAccent.copy(alpha = 0.8f),
     width: Dp = 4.dp
 ): Modifier = drawWithContent {
     drawContent()
@@ -121,7 +124,7 @@ fun CameraSettingsDialog(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.55f))
+            .background(Color.Black.copy(alpha = 0.65f))
             .clickable(onClick = onDismissRequest),
         contentAlignment = Alignment.Center
     ) {
@@ -132,7 +135,9 @@ fun CameraSettingsDialog(
                 .heightIn(max = dialogMaxHeight)
                 .rotate(rotationAngle),
             shape = RoundedCornerShape(32.dp),
-            color = Color.White,
+            color = Color(0xFF141414),
+            contentColor = Color.White,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
             tonalElevation = 8.dp
         ) {
             Column {
@@ -154,14 +159,14 @@ fun CameraSettingsDialog(
                         text = if (facing == LensFacing.FRONT) "Front" else "Rear",
                         fontSize = if (isLandscape) 20.sp else 24.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.Black
+                        color = Color.White
                     )
 
                     Surface(
                         onClick = onDismissRequest,
                         shape = CircleShape,
-                        color = Color(0xFFF0F0F0),
-                        contentColor = Color.DarkGray,
+                        color = Color.White.copy(alpha = 0.12f),
+                        contentColor = Color.White.copy(alpha = 0.85f),
                         modifier = Modifier.size(if (isLandscape) 28.dp else 32.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -246,7 +251,7 @@ fun CameraSettingsDialog(
                             Text(
                                 text = "No hidden lenses detected on this device",
                                 fontSize = 14.sp,
-                                color = Color.Gray,
+                                color = Color.White.copy(alpha = 0.5f),
                                 modifier = Modifier.padding(vertical = 4.dp)
                             )
                         }
@@ -275,16 +280,18 @@ private fun SettingToggleRow(
             text = label,
             fontSize = if (isLandscape) 16.sp else 20.sp,
             fontWeight = FontWeight.Normal,
-            color = Color.Black
+            color = Color.White
         )
         Switch(
             checked = checked,
             onCheckedChange = { onToggle() },
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF38ACFA),
-                uncheckedThumbColor = Color.White,
-                uncheckedTrackColor = Color(0xFFE0E0E0)
+                checkedThumbColor = Color.Black,
+                checkedTrackColor = YellowAccent,
+                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                uncheckedTrackColor = Color.White.copy(alpha = 0.15f),
+                uncheckedBorderColor = Color.Transparent,
+                checkedBorderColor = Color.Transparent
             )
         )
     }
@@ -310,14 +317,18 @@ private fun RegionSettingRow(
                 text = "Region",
                 fontSize = if (isLandscape) 16.sp else 20.sp,
                 fontWeight = FontWeight.Normal,
-                color = Color.Black
+                color = Color.White
             )
 
             Surface(
                 onClick = { expanded = !expanded },
                 shape = RoundedCornerShape(10.dp),
-                color = Color(0xFFF0F0F0),
-                contentColor = Color.Black
+                color = if (expanded) YellowAccent.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.1f),
+                contentColor = if (expanded) YellowAccent else Color.White,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (expanded) YellowAccent else Color.White.copy(alpha = 0.2f)
+                )
             ) {
                 Row(
                     modifier = Modifier.padding(
@@ -336,7 +347,8 @@ private fun RegionSettingRow(
                     Icon(
                         imageVector = Icons.Default.ArrowDropDown,
                         contentDescription = "Change region",
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(24.dp),
+                        tint = if (expanded) YellowAccent else Color.White
                     )
                 }
             }
@@ -347,11 +359,15 @@ private fun RegionSettingRow(
         if (expanded) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFFF7F7F7),
-                modifier = Modifier.fillMaxWidth()
+                color = Color(0xFF1E1E1E),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
             ) {
                 Column {
                     for (standard in VideoStandard.entries) {
+                        val isSelected = standard == current
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -360,8 +376,8 @@ private fun RegionSettingRow(
                                     expanded = false
                                 }
                                 .padding(
-                                    horizontal = 12.dp,
-                                    vertical = if (isLandscape) 8.dp else 10.dp
+                                    horizontal = 14.dp,
+                                    vertical = if (isLandscape) 8.dp else 12.dp
                                 ),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -369,18 +385,18 @@ private fun RegionSettingRow(
                             Text(
                                 text = standard.label,
                                 fontSize = if (isLandscape) 14.sp else 16.sp,
-                                fontWeight = if (standard == current) {
+                                fontWeight = if (isSelected) {
                                     FontWeight.Bold
                                 } else {
                                     FontWeight.Normal
                                 },
-                                color = Color.Black
+                                color = if (isSelected) YellowAccent else Color.White
                             )
-                            if (standard == current) {
+                            if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Selected",
-                                    tint = Color(0xFF38ACFA),
+                                    tint = YellowAccent,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -410,16 +426,16 @@ private fun CameraSettingItem(
             checked = isChecked,
             onCheckedChange = { onToggle() },
             colors = CheckboxDefaults.colors(
-                checkedColor = Color(0xFF4CAF50),
-                uncheckedColor = Color.Gray,
-                checkmarkColor = Color.White
+                checkedColor = YellowAccent,
+                uncheckedColor = Color.White.copy(alpha = 0.4f),
+                checkmarkColor = Color.Black
             )
         )
         Spacer(modifier = Modifier.width(if (isLandscape) 6.dp else 8.dp))
         Text(
             text = camera.displayName,
             fontSize = if (isLandscape) 15.sp else 18.sp,
-            color = Color.Black
+            color = Color.White
         )
     }
 }
