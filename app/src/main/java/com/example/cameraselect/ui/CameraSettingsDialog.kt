@@ -89,10 +89,12 @@ fun CameraSettingsDialog(
     showHidden: Boolean,
     isMirrored: Boolean,
     noCrop: Boolean,
+    opticalStabilizationEnabled: Boolean,
     videoStandard: VideoStandard,
     onToggleShowHidden: () -> Unit,
     onToggleIsMirrored: () -> Unit,
     onToggleNoCrop: () -> Unit,
+    onToggleOpticalStabilization: () -> Unit,
     onVideoStandardChange: (VideoStandard) -> Unit,
     onToggleCameraEnabled: (String) -> Unit,
     onDismissRequest: () -> Unit,
@@ -227,7 +229,15 @@ fun CameraSettingsDialog(
                         isLandscape = isLandscape
                     )
 
-                    // 5. Show hidden lenses Toggle Row
+                    // 5. Optical image stabilization Toggle Row
+                    SettingToggleRow(
+                        label = "Optical image stabilization",
+                        checked = opticalStabilizationEnabled,
+                        onToggle = onToggleOpticalStabilization,
+                        isLandscape = isLandscape
+                    )
+
+                    // 6. Show hidden lenses Toggle Row
                     SettingToggleRow(
                         label = "Show hidden lenses",
                         checked = showHidden,
@@ -235,7 +245,7 @@ fun CameraSettingsDialog(
                         isLandscape = isLandscape
                     )
 
-                    // 6. Hidden Lenses List (Shown when showHidden is true)
+                    // 7. Hidden Lenses List (Shown when showHidden is true)
                     if (showHidden) {
                         Spacer(modifier = Modifier.height(if (isLandscape) 4.dp else 8.dp))
                         if (hiddenCameras.isNotEmpty()) {
@@ -462,10 +472,12 @@ fun FrontCameraSettingsDialogPreview() {
             showHidden = true,
             isMirrored = true,
             noCrop = false,
+            opticalStabilizationEnabled = true,
             videoStandard = VideoStandard.NTSC,
             onToggleShowHidden = {},
             onToggleIsMirrored = {},
             onToggleNoCrop = {},
+            onToggleOpticalStabilization = {},
             onVideoStandardChange = {},
             onToggleCameraEnabled = {},
             onDismissRequest = {}
@@ -515,10 +527,12 @@ fun RearCameraSettingsDialogPreview() {
             showHidden = true,
             isMirrored = false,
             noCrop = false,
+            opticalStabilizationEnabled = true,
             videoStandard = VideoStandard.NTSC,
             onToggleShowHidden = {},
             onToggleIsMirrored = {},
             onToggleNoCrop = {},
+            onToggleOpticalStabilization = {},
             onVideoStandardChange = {},
             onToggleCameraEnabled = {},
             onDismissRequest = {}

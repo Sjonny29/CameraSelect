@@ -70,8 +70,11 @@ fun ProCameraDock(
         Box(modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth()) {
             // Fixed height sized for the longest pill content. In landscape this
             // height becomes the pill's visual width, so it must fit labels like
-            // "1/64000" (~37dp) and "102400" (~39dp) with margin.
-            val dockHeight = 48.dp
+            // "1/64000" (~43dp) and "102400" (~39dp) with room to spare: 68dp
+            // leaves ~66dp of reading length, which keeps the full shutter value
+            // legible (roughly three digits more than the old 48dp) even when the
+            // system font scale is raised.
+            val dockHeight = 68.dp
 
             Row(
                 modifier = Modifier

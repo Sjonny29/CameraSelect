@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.util.Log
 import androidx.core.content.edit
 import com.example.cameraselect.capture.CameraCaptureManager
@@ -37,6 +38,7 @@ class CameraRepository(private val context: Context) {
         val focalLengthActual: Float,
         val eq35mm: Int,
         val supportsRaw: Boolean,
+        val supportsOpticalStabilization: Boolean,
     )
 
     @SuppressLint("MissingPermission")
@@ -112,6 +114,9 @@ class CameraRepository(private val context: Context) {
             }
 
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            val supportsOpticalStabilization =
+                characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+                    ?.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON) == true
 
             rawList.add(
                 RawCameraData(
@@ -120,7 +125,8 @@ class CameraRepository(private val context: Context) {
                     isHidden = isHidden,
                     focalLengthActual = actualFocal,
                     eq35mm = eq35mm,
-                    supportsRaw = CameraCaptureManager.supportsRawCapture(characteristics)
+                    supportsRaw = CameraCaptureManager.supportsRawCapture(characteristics),
+                    supportsOpticalStabilization = supportsOpticalStabilization
                 )
             )
 
@@ -170,7 +176,8 @@ class CameraRepository(private val context: Context) {
                         focalLengthMm = if (raw.eq35mm > 0) raw.eq35mm else raw.focalLengthActual.roundToInt(),
                         focalLengthActual = raw.focalLengthActual,
                         displayName = displayName,
-                        supportsRaw = raw.supportsRaw
+                        supportsRaw = raw.supportsRaw,
+                        supportsOpticalStabilization = raw.supportsOpticalStabilization
                     )
                 )
             }
@@ -337,6 +344,13 @@ class CameraRepository(private val context: Context) {
 
     fun setVideoStandard(standard: VideoStandard) {
         prefs.edit { putString("video_standard", standard.name) }
+    }
+
+    fun getOpticalStabilizationEnabled(): Boolean =
+        prefs.getBoolean("optical_stabilization_enabled", true)
+
+    fun setOpticalStabilizationEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean("optical_stabilization_enabled", enabled) }
     }
 
     private fun facingKey(prefix: String, facing: LensFacing): String =
