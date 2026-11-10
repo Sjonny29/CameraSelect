@@ -279,7 +279,7 @@ private fun ExposurePanel(
             color = Color(0xFFEDEDED),
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (sideways) Modifier.height(72.dp) else Modifier)
+                .then(if (sideways) Modifier.height(88.dp) else Modifier)
         ) {
             Box(
                 modifier = if (sideways) Modifier.fillMaxSize() else Modifier,

@@ -85,6 +85,7 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
@@ -294,6 +295,35 @@ fun FlashOffCustomIcon(
 }
 
 @Composable
+fun OisNotDetectedBadge(modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Color.Black.copy(alpha = 0.6f),
+        contentColor = Color.White,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = Color(0xFFFF3B30),
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = "OIS not found",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
 fun SimulatedScreenFlashOverlay(
     isScreenFlashActive: Boolean,
     modifier: Modifier = Modifier
@@ -388,6 +418,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
     val flashMode by viewModel.flashMode.collectAsStateWithLifecycle()
     val photoFormat by viewModel.photoFormat.collectAsStateWithLifecycle()
     val videoStandard by viewModel.videoStandard.collectAsStateWithLifecycle()
+    val opticalStabilizationEnabled by viewModel.opticalStabilizationEnabled.collectAsStateWithLifecycle()
 
     val captureMode by viewModel.captureMode.collectAsStateWithLifecycle()
     val isRecording by viewModel.isRecording.collectAsStateWithLifecycle()
@@ -459,6 +490,14 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             rawUnavailableCameraId != selectedCameraId &&
             allCameras.firstOrNull { it.id == selectedCameraId }?.supportsRaw == true
     }
+    val selectedLensSupportsOis = remember(allCameras, selectedCameraId) {
+        selectedCameraId?.let { id ->
+            allCameras.firstOrNull { it.id == id }?.supportsOpticalStabilization
+        } ?: true
+    }
+    val showOisWarning = opticalStabilizationEnabled &&
+        selectedCameraId != null &&
+        !selectedLensSupportsOis
     val isRawCaptureEnabled = captureMode.isPhoto &&
         photoFormat == PhotoFormat.JPEG_PLUS_RAW &&
         selectedLensSupportsRaw
@@ -711,6 +750,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 isVideoMode = captureMode.isVideo,
                 isProMode = isProMode,
                 manualSettings = manualSettings,
+                opticalStabilizationEnabled = opticalStabilizationEnabled,
                 captureController = captureController,
                 onHasFlashChanged = { hasPhysicalFlash ->
                     hasPhysicalFlashForSelectedCamera = hasPhysicalFlash
@@ -751,77 +791,86 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
             )
         }
 
-        // 5. Top-Left Flash Toggle and (in Pro mode) the photo/video toggle
-        Row(
+        // 5. Top-Left Flash Toggle, optional OIS warning, and (in Pro mode) the
+        // photo/video toggle.
+        Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(top = topControlsPadding, start = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            IconButton(
-                onClick = {
-                    if (isManualExposureActive) {
-                        viewModel.cycleManualExposureFlashMode()
-                    } else {
-                        viewModel.cycleFlashMode()
-                    }
-                },
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                    .size(56.dp)
-                    .rotate(buttonRotation)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                when (displayedFlashMode) {
-                    FlashMode.AUTO -> {
-                        Icon(
-                            imageVector = Icons.Default.FlashAuto,
-                            contentDescription = "Flash Auto",
-                            tint = Color.White,
-                            modifier = Modifier.size(44.dp)
-                        )
+                IconButton(
+                    onClick = {
+                        if (isManualExposureActive) {
+                            viewModel.cycleManualExposureFlashMode()
+                        } else {
+                            viewModel.cycleFlashMode()
+                        }
+                    },
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                        .size(56.dp)
+                        .rotate(buttonRotation)
+                ) {
+                    when (displayedFlashMode) {
+                        FlashMode.AUTO -> {
+                            Icon(
+                                imageVector = Icons.Default.FlashAuto,
+                                contentDescription = "Flash Auto",
+                                tint = Color.White,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+                        FlashMode.OFF -> {
+                            FlashOffCustomIcon(
+                                isRecording = false,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+                        FlashMode.ON -> {
+                            Icon(
+                                imageVector = Icons.Default.FlashOn,
+                                contentDescription = "Flash On",
+                                tint = Color.White,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+                        FlashMode.TORCH -> {
+                            Icon(
+                                imageVector = Icons.Default.Lightbulb,
+                                contentDescription = "Torch Light",
+                                tint = Color.White,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
                     }
-                    FlashMode.OFF -> {
-                        FlashOffCustomIcon(
-                            isRecording = false,
-                            modifier = Modifier.size(44.dp)
-                        )
-                    }
-                    FlashMode.ON -> {
-                        Icon(
-                            imageVector = Icons.Default.FlashOn,
-                            contentDescription = "Flash On",
-                            tint = Color.White,
-                            modifier = Modifier.size(44.dp)
-                        )
-                    }
-                    FlashMode.TORCH -> {
-                        Icon(
-                            imageVector = Icons.Default.Lightbulb,
-                            contentDescription = "Torch Light",
-                            tint = Color.White,
-                            modifier = Modifier.size(44.dp)
-                        )
-                    }
+                }
+
+                // Hidden while recording so the timer at the top centre stays clear.
+                if (isProMode && !isRecording) {
+                    ProCaptureModeToggle(
+                        isVideo = captureMode.isVideo,
+                        onToggle = {
+                            viewModel.setCaptureMode(
+                                if (captureMode.isVideo) {
+                                    CaptureMode.PRO_PHOTO
+                                } else {
+                                    CaptureMode.PRO_VIDEO
+                                }
+                            )
+                        },
+                        modifier = Modifier.rotate(buttonRotation)
+                    )
                 }
             }
 
-            // Hidden while recording so the timer at the top centre stays clear.
-            if (isProMode && !isRecording) {
-                ProCaptureModeToggle(
-                    isVideo = captureMode.isVideo,
-                    onToggle = {
-                        viewModel.setCaptureMode(
-                            if (captureMode.isVideo) {
-                                CaptureMode.PRO_PHOTO
-                            } else {
-                                CaptureMode.PRO_VIDEO
-                            }
-                        )
-                    },
-                    modifier = Modifier.rotate(buttonRotation)
-                )
+            if (showOisWarning) {
+                OisNotDetectedBadge()
             }
         }
 
@@ -1025,7 +1074,7 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(bottom = 175.dp, end = 16.dp)
+                    .padding(bottom = 195.dp, end = 16.dp)
             ) {
                 ProControlPanel(
                     target = openProControl!!,
@@ -1090,10 +1139,12 @@ fun CameraScreen(viewModel: CameraViewModel = viewModel()) {
                 showHidden = currentFacingShowHidden,
                 isMirrored = currentFacingIsMirrored,
                 noCrop = currentFacingNoCrop,
+                opticalStabilizationEnabled = opticalStabilizationEnabled,
                 videoStandard = videoStandard,
                 onToggleShowHidden = { viewModel.toggleShowHidden(activeFacing) },
                 onToggleIsMirrored = { viewModel.toggleIsMirrored(activeFacing) },
                 onToggleNoCrop = { viewModel.toggleNoCrop(activeFacing) },
+                onToggleOpticalStabilization = { viewModel.toggleOpticalStabilization() },
                 onVideoStandardChange = { viewModel.setVideoStandard(it) },
                 onToggleCameraEnabled = { id -> viewModel.toggleCameraEnabled(id) },
                 onDismissRequest = { viewModel.setSettingsOpen(false) },
@@ -1565,6 +1616,10 @@ private class CameraSessionHolder {
     var hasFlash: Boolean = false
     var flashMode: FlashMode = FlashMode.OFF
 
+    // Optical stabilization is a global preference applied to every request.
+    @Volatile var opticalStabilizationEnabled: Boolean = true
+    @Volatile var supportsOpticalStabilization: Boolean = false
+
     // Pro manual exposure / focus state.
     @Volatile var isProMode: Boolean = false
     @Volatile var manualSettings: ManualCameraSettings = ManualCameraSettings()
@@ -1883,6 +1938,57 @@ private class CameraSessionHolder {
             }
         } else {
             applyFocusMetering(builder)
+        }
+
+        applyOpticalStabilization(builder)
+    }
+
+    /**
+     * Applies the OIS preference. Lenses that do not advertise optical
+     * stabilization ignore the setting instead of receiving an unsupported key.
+     * Android requires video (electronic) stabilization to be off while OIS is
+     * on, so enabling OIS explicitly turns EIS off.
+     */
+    private fun applyOpticalStabilization(builder: CaptureRequest.Builder) {
+        if (!supportsOpticalStabilization) return
+        if (opticalStabilizationEnabled) {
+            builder.set(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+            )
+            builder.set(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+            )
+        } else {
+            builder.set(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+            )
+        }
+    }
+
+    /**
+     * Pushes the OIS preference into the live session without restarting the
+     * camera. Called from the view's update block and safe to call repeatedly.
+     */
+    fun updateOpticalStabilization(enabled: Boolean) {
+        if (opticalStabilizationEnabled == enabled) return
+        opticalStabilizationEnabled = enabled
+        if (isClosed || !supportsOpticalStabilization) return
+
+        val builder = (if (isRecording) videoRequestBuilder else previewRequestBuilder) ?: return
+        val sess = session ?: return
+
+        try {
+            applyOpticalStabilization(builder)
+            sess.setRepeatingRequest(
+                builder.build(),
+                createRepeatingCallback(forRecording = isRecording),
+                backgroundHandler
+            )
+        } catch (e: Exception) {
+            Log.e("Camera2Preview", "Error updating optical stabilization", e)
         }
     }
 
@@ -2940,6 +3046,7 @@ private class CameraSessionHolder {
         }
 
         applyAntiBanding(builder, standard)
+        applyOpticalStabilization(builder)
 
         if (isManualFocusActive()) {
             val maxFocus = manualCapabilities.minimumFocusDistance ?: 0f
@@ -3289,6 +3396,7 @@ fun Camera2PreviewView(
     isVideoMode: Boolean = false,
     isProMode: Boolean = false,
     manualSettings: ManualCameraSettings = ManualCameraSettings(),
+    opticalStabilizationEnabled: Boolean = true,
     captureController: CameraCaptureController,
     onHasFlashChanged: (Boolean) -> Unit = {},
     onRawUnavailable: () -> Unit = {},
@@ -3355,7 +3463,8 @@ fun Camera2PreviewView(
             }
             openCameraSession(
                 context, cameraManager, cameraId, isMirrored, isNoCrop, flashMode,
-                captureRaw, textureView, surface, width, height, holder, deviceRotationDegrees
+                captureRaw, opticalStabilizationEnabled, textureView, surface, width, height, holder,
+                deviceRotationDegrees
             )
         }
 
@@ -3470,6 +3579,7 @@ fun Camera2PreviewView(
                             holder.viewTransform = configureTransform(isMirrored, isNoCrop, textureView, textureView.width, textureView.height, previewSize, holder.sensorOrientation, deviceRotationDegrees)
                         }
                         holder.updateFlash(flashMode)
+                        holder.updateOpticalStabilization(opticalStabilizationEnabled)
                         holder.onRawUnavailable = onRawUnavailable
                         holder.updateRawCaptureEnabled(captureRaw)
                     }
@@ -3563,6 +3673,7 @@ private fun openCameraSession(
     isNoCrop: Boolean,
     flashMode: FlashMode,
     captureRaw: Boolean,
+    opticalStabilizationEnabled: Boolean,
     textureView: TextureView,
     surfaceTexture: SurfaceTexture,
     width: Int,
@@ -3581,6 +3692,10 @@ private fun openCameraSession(
     try {
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         holder.characteristics = characteristics
+        holder.opticalStabilizationEnabled = opticalStabilizationEnabled
+        holder.supportsOpticalStabilization =
+            characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+                ?.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON) == true
         holder.configureFocusCapabilities(characteristics)
         holder.manualCapabilities = CameraCaptureManager.readManualCapabilities(characteristics)
         holder.onManualCapabilitiesChanged?.invoke(holder.manualCapabilities)

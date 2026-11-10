@@ -52,6 +52,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _videoStandard = MutableStateFlow(repository.getVideoStandard())
     val videoStandard: StateFlow<VideoStandard> = _videoStandard.asStateFlow()
 
+    private val _opticalStabilizationEnabled =
+        MutableStateFlow(repository.getOpticalStabilizationEnabled())
+    val opticalStabilizationEnabled: StateFlow<Boolean> = _opticalStabilizationEnabled.asStateFlow()
+
     private val _enabledCameraIds = MutableStateFlow<Set<String>>(emptySet())
     val enabledCameraIds: StateFlow<Set<String>> = _enabledCameraIds.asStateFlow()
 
@@ -151,6 +155,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setVideoStandard(standard: VideoStandard) {
         _videoStandard.value = standard
         repository.setVideoStandard(standard)
+    }
+
+    fun toggleOpticalStabilization() {
+        val newValue = !_opticalStabilizationEnabled.value
+        _opticalStabilizationEnabled.value = newValue
+        repository.setOpticalStabilizationEnabled(newValue)
     }
 
     /**
